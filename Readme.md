@@ -26,11 +26,11 @@ This Python script allows you to scrape information about the top 10 news (can b
 1. Clone the repository:
 
    ```sh
-   git clone https://github.com/anujhsrsaini/Play_Store_Review_Scraper.git
+   git clone https://github.com/anujhsrsaini/Play-Store-Review-Scraper.git
    ```
 2. Navigate to the project directory:
    ```sh 
-   cd Play_Store_Review_Scraper
+   cd Play-Store-Review-Scraper
    ```
 3. Initiate a virtual environment and activate the virtual environment:
    ```sh 
