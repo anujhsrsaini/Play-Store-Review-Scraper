@@ -36,7 +36,7 @@ data.drop(['installs','minInstalls','free','currency','sale','saleTime','origina
 data.to_csv("Top10_"+keyword+"_Apps.csv")
 print("Fetched top 10 "+keyword+" apps")
 
-#Fetch latest 20k reviews of above apps one by one and save to specific csv files
+#Fetch latest 5k reviews of above apps one by one and save to specific csv files
 for idx, row in search_results.iterrows():
     print("Fetching reviews for " + row['appId'])
     g_reviews, token = reviews(
@@ -44,6 +44,6 @@ for idx, row in search_results.iterrows():
                         lang='en', # defaults to 'en'
                         country='in', # defaults to 'us'
                         sort=Sort.NEWEST, # defaults to Sort.MOST_RELEVANT
-                        count = 20000
+                        count = 5000
                     )
     pd.DataFrame(g_reviews).to_csv("reviews/"+str(row['appId'])+".csv") 
