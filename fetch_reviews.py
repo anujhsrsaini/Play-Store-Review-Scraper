@@ -3,7 +3,7 @@ from google_play_scraper import app, Sort, reviews_all, search, reviews
 import pandas as pd
 
 #Search for apps for google playstore
-keyword = "News"
+keyword = "Scientific Calculator"
 result = search(
     keyword,
     lang="en",  # defaults to 'en'
