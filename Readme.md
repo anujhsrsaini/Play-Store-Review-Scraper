@@ -8,6 +8,7 @@
 - [Features](#features)
 - [Installation](#installation)
 - [Usage](#usage)
+- [Authors](#authors)
 
 ## Introduction
 
@@ -57,3 +58,7 @@ This script performs the following steps:
 * Stores the app information in a CSV file named Top10_NewsApps.csv.
 * For each app, it downloads user reviews, saving them in separate CSV files named after the app's package name.
 * You can analyze the collected data using your preferred data analysis tools, such as Python, SQL, or Tableau.
+
+## Authors
+
+- **[Anuj Saini](https://www.linkedin.com/in/anuj-saini-7230a0257/)**
