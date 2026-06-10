@@ -11,8 +11,9 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Anuj Saini" }]
 dependencies = [
-  # Unofficial scraper — pinned with an upper bound; it can break on Google changes.
-  "google-play-scraper>=1.2.4,<1.3",
+  # Unofficial scraper — EXACT pin (shape-stable): patch bumps have historically changed
+  # response dict shapes silently. Upgrades are an explicit PR step: bump, run tests, commit.
+  "google-play-scraper==1.2.7",
 ]
 
 # Later phases add their own extras here (api: fastapi/uvicorn, db: sqlalchemy/alembic,

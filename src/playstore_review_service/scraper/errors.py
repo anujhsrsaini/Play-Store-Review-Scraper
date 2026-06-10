@@ -26,4 +26,8 @@ class ScrapeTimeout(ScraperError):
 
 
 class RateLimitedUpstream(ScraperError):
-    """Google Play throttled the request (HTTP 429 / Too Many Requests)."""
+    """Google Play throttled the request (HTTP 429 / PlayGatewayError)."""
+
+
+class InvalidAppId(ScraperError):
+    """The app id failed validation (must match ``^[a-zA-Z0-9._]{1,200}$``)."""

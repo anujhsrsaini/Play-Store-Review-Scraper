@@ -69,7 +69,10 @@ Top Praises, Feature Requests, Sentiment Summary, What Changed in Latest Update)
   served from the cached snapshot. **Single-flight**: concurrent requests for the same cold
   app trigger exactly one scrape and share its result.
 - Hard server-side cap on reviews per scrape (e.g. ≤2000); polite delay + exponential
-  backoff between pages; respect `Retry-After`.
+  backoff between pages. (`Retry-After` is NOT observable through `google-play-scraper`
+  1.2.7 — its transport consumes HTTP errors and re-raises message-only exceptions —
+  so throttling is classified as `rate_limited_upstream` and pacing relies on our own
+  backoff. Revisit if the transport is ever replaced.)
 
 ### 4.2 Latency / async
 - A scrape + LLM call MUST NOT run in a synchronous HTTP request. Pattern: `POST /analyze`
