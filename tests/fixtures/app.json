@@ -1,0 +1,21 @@
+{
+  "appId": "com.example.calc",
+  "title": "Example Calc",
+  "score": 4.27,
+  "ratings": 18452,
+  "reviews": 5231,
+  "histogram": [1200, 800, 1500, 4000, 11000],
+  "installs": "1,000,000+",
+  "realInstalls": 1530221,
+  "minInstalls": 1000000,
+  "price": 0,
+  "free": true,
+  "offersIAP": true,
+  "adSupported": true,
+  "genre": "Tools",
+  "contentRating": "Everyone",
+  "released": "Jan 5, 2019",
+  "updated": 1716950400,
+  "version": "4.3.1",
+  "developer": "ExampleCo"
+}

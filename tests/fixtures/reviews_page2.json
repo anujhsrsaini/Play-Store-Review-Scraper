@@ -1,0 +1,20 @@
+[
+  {
+    "reviewId": "r3",
+    "userName": "Alice",
+    "content": "Too many ads now, used to be great.",
+    "score": 2,
+    "thumbsUpCount": 7,
+    "reviewCreatedVersion": "4.3.1",
+    "at": "2026-05-09T12:00:00"
+  },
+  {
+    "reviewId": "r2",
+    "userName": "John Smith",
+    "content": "duplicate id — should be de-duplicated by the paginator",
+    "score": 5,
+    "thumbsUpCount": 3,
+    "reviewCreatedVersion": "4.3.0",
+    "at": "2026-05-10T08:00:00"
+  }
+]

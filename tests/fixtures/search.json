@@ -1,0 +1,20 @@
+[
+  {
+    "appId": "com.example.calc",
+    "title": "Example Calc",
+    "score": 4.3,
+    "developer": "ExampleCo",
+    "installs": "1,000,000+",
+    "free": true,
+    "price": 0
+  },
+  {
+    "appId": "com.other.calc",
+    "title": "Other Calc",
+    "score": 3.9,
+    "developer": "OtherCo",
+    "installs": "500,000+",
+    "free": true,
+    "price": 0
+  }
+]

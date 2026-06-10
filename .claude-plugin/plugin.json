@@ -1,0 +1,8 @@
+{
+  "name": "Play-Store-Review-Scraper",
+  "version": "0.1.0",
+  "description": "Python tool to scrape Google Play Store app reviews via google-play-scraper",
+  "skills": [
+    "./skills/"
+  ]
+}
