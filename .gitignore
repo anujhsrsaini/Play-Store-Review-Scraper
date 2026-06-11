@@ -15,9 +15,11 @@ htmlcov/
 dist/
 build/
 
-# --- Scraped output (CSV) ---
+# --- Scraped output (CSV) / local databases ---
 reviews/
 *.csv
+*.db
+*.sqlite3
 
 # --- Notebooks & scratch ---
 *.ipynb

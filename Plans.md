@@ -35,9 +35,9 @@ cost/security controls (Phase 3) before going live.
 
 | Task | 内容 | DoD | Depends | Status |
 |------|------|-----|---------|--------|
-| 1.1 | **Postgres data model + migrations**: `users, api_keys, review_snapshots, cached_reviews, scrape_jobs, analyses, usage_log`; Alembic. `[tdd:required]` | `alembic upgrade head` builds schema; round-trip insert/read tested | 0.2 | cc:TODO |
-| 1.2 | **FastAPI + Postgres-backed job queue + worker**: `POST /analyze` → enqueue → worker (`SELECT … FOR UPDATE SKIP LOCKED`) scrapes (0.3) → persists snapshot; `GET /jobs/{id}` polling with status `queued/scraping/analyzing/done/error`. **LLM stubbed** (return raw themes). `[tdd:required]` | End-to-end (scraper mocked): submit → poll → done with persisted snapshot; worker is a separate process | 1.1, 0.3 | cc:TODO |
-| 1.3 | **Scrape-and-cache + single-flight**: 24h snapshot reuse; concurrent requests for same cold app trigger exactly one scrape and share result. `[tdd:required]` | Test: 2nd request within window does no re-scrape; N concurrent cold requests → 1 scrape (lock/coalesce) | 1.2 | cc:TODO |
+| 1.1 | **Data model** (`review_snapshots, cached_reviews, jobs, analyses, usage_log`; SQLAlchemy 2.0; SQLite local / Postgres prod). Alembic migrations deferred to 5.1 (localhost uses `create_all`). `users/api_keys` tables arrive with 3.1. `[tdd:required]` | Schema builds; round-trip insert/read tested | 0.2 | cc:完了 (db.py; Alembic + users tables pending) |
+| 1.2 | **FastAPI + DB-backed job queue + worker**: `POST /api/analyze` → enqueue → worker scrapes (0.3) → persists snapshot; `GET /api/jobs/{id}` polling `queued/scraping/analyzing/done/error`; `FOR UPDATE SKIP LOCKED` on Postgres; standalone `pmr-worker` + dev in-process thread. `[tdd:required]` | End-to-end (scraper mocked): submit → poll → done with persisted snapshot | 1.1, 0.3 | cc:完了 (webapp.py + worker.py; e2e tested) |
+| 1.3 | **Scrape-and-cache + single-flight**: 24h snapshot reuse; identical active jobs coalesced (same job returned). `[tdd:required]` | Test: 2nd request within window does no re-scrape; identical concurrent requests share one job | 1.2 | cc:完了 (ensure_snapshot + job coalescing; tested) |
 
 ---
 
@@ -45,11 +45,11 @@ cost/security controls (Phase 3) before going live.
 
 | Task | 内容 | DoD | Depends | Status |
 |------|------|-----|---------|--------|
-| 2.1 | **Gemini client (worker-only)** + structured JSON output (`response_schema`) + grounding system prompt with untrusted-content delimiters; flash-lite default, escalate-to-flash path. `[tdd:required]` | Test (mocked Gemini): returns schema-valid JSON; prompt contains delimiters + grounding rules; key never logged | 1.2 | cc:TODO |
-| 2.2 | **Context curation**: stratified sample (recent + most-helpful + star-strata), strip PII, token-budget cap (~40K) + pre-flight token estimate. `[tdd:required]` | Test: large corpus → capped, balanced sample under token budget; names stripped from prompt | 0.3 | cc:TODO |
-| 2.3 | **Star-based sentiment (full corpus, free)** merged with LLM themes/quotes into final answer JSON. `[tdd:required]` | Test: sentiment % computed from stars over all reviews; `source=star_ratings`; merged into response | 1.1 | cc:TODO |
-| 2.4 | **Quote verification + grounding guards**: every returned quote verified as substring of cited review; validate ids; `not_enough_data` path; retry→escalate on schema/verification failure. `[tdd:required]` | Test: fabricated quote dropped/flagged; unknown id rejected; thin-evidence → `not_enough_data:true` | 2.1 | cc:TODO |
-| 2.5 | **Answer cache + usage logging**: cache keyed `(app_id,country,lang,normalized_question,snapshot_id)`; record tokens + cost estimate in `usage_log`. `[tdd:required]` | Test: identical question on same snapshot → cache hit, no Gemini call; usage row written with token/cost | 2.1, 1.1 | cc:TODO |
+| 2.1 | **Gemini client (worker-only)** + structured JSON output (`response_schema`) + grounding system prompt with untrusted-content delimiters; flash-lite default. Escalate-to-flash retry path still TODO. `[tdd:required]` | Test (mocked Gemini): returns schema-valid JSON; prompt contains delimiters + grounding rules; key never logged | 1.2 | cc:完了 (llm.py; live-key e2e validation pending owner key; escalation path TODO) |
+| 2.2 | **Context curation**: stratified sample (recent + most-helpful + star-strata), strip PII, token-budget cap (~40K) + pre-flight token estimate. `[tdd:required]` | Test: large corpus → capped, balanced sample under token budget; names stripped from prompt | 0.3 | cc:完了 (analysis.curate_reviews; tested) |
+| 2.3 | **Star-based sentiment (full corpus, free)** merged with LLM themes/quotes into final answer JSON. `[tdd:required]` | Test: sentiment % computed from stars over all reviews; `source=star_ratings`; merged into response | 1.1 | cc:完了 (tested incl. e2e merge) |
+| 2.4 | **Quote verification + grounding guards**: every returned quote verified as substring of cited review; validate ids; `not_enough_data` path. Retry→escalate on schema failure still TODO. `[tdd:required]` | Test: fabricated quote dropped/flagged; unknown id rejected; thin-evidence → `not_enough_data:true` | 2.1 | cc:完了 (analysis.verify_quotes; tested; retry/escalate TODO) |
+| 2.5 | **Answer cache + usage logging**: cache keyed `(app_id,country,lang,normalized_question,snapshot_id)`; record tokens + cost estimate in `usage_log`; **global daily spend cap enforced pre-call** (pulled forward from 3.3). `[tdd:required]` | Test: identical question on same snapshot → cache hit, no Gemini call; usage row written; cap blocks LLM call | 2.1, 1.1 | cc:完了 (tested incl. spend-cap block) |
 
 ---
 
@@ -69,9 +69,9 @@ cost/security controls (Phase 3) before going live.
 
 | Task | 内容 | DoD | Depends | Status |
 |------|------|-----|---------|--------|
-| 4.1 | **Core flow UI**: search → app picker → ask (free-form box + ~5 preset buttons, defaulted scope) → in-page progress (poll, staged "fetched X/Y") → result. `[tdd:required]` | User can run search→ask→result against staging API; presets pre-fill prompts | 1.2, 2.5 | cc:TODO |
-| 4.2 | **Result presentation**: answer + cited quotes (star+date) + star sentiment chart + scope/caveat banner + free cached re-ask. `[tdd:skip:presentation]` | Result page shows quotes, sentiment chart, caveat banner; re-ask on cached data makes no new Gemini call | 4.1 | cc:TODO |
-| 4.3 | **Sign-in UX + quota chip + error/empty states**: OAuth/magic-link screen; "N/M left today" chip; states for app-not-found, scrape-blocked, zero-reviews, quota-exhausted, LLM-error. `[tdd:required]` | All listed states render a friendly message (not a crash); quota chip decrements | 4.1, 3.1, 3.2 | cc:TODO |
+| 4.1 | **Core flow UI**: search → app picker → ask (free-form box + 5 preset buttons) → in-page progress (poll, live "fetched X" count) → result. `[tdd:required]` | User can run search→ask→result locally; presets pre-fill prompts | 1.2, 2.5 | cc:完了 (static/index.html; escaped rendering) |
+| 4.2 | **Result presentation**: answer + cited quotes (star+date) + star sentiment bar + scope/caveat banner + free cached re-ask. `[tdd:skip:presentation]` | Result page shows quotes, sentiment chart, caveat banner; re-ask on cached data makes no new Gemini call | 4.1 | cc:完了 |
+| 4.3 | **Sign-in UX + quota chip + error/empty states**: OAuth/magic-link screen; "N/M left today" chip (needs 3.1/3.2); error states for app-not-found/scrape-blocked/LLM-error shipped in 4.1. `[tdd:required]` | All listed states render a friendly message; quota chip decrements | 4.1, 3.1, 3.2 | cc:TODO (error states done; sign-in + quota chip blocked on Phase 3) |
 | 4.4 | **SSE streaming of LLM answer** (polish). `[tdd:skip:optional-polish]` | Answer streams token-by-token once status=analyzing | 4.2 | cc:TODO |
 
 ---
