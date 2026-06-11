@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play Store Review Analysis</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --line:#262b36; --text:#e8eaf0; --dim:#9aa3b2;
+          --accent:#4f8cff; --pos:#34c77b; --neu:#8b93a3; --neg:#e5604c; --chip:#1f2430; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+  h1 { font-size:22px; margin:0 0 4px; } .sub { color:var(--dim); margin:0 0 28px; font-size:13px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:18px; }
+  .row { display:flex; gap:10px; }
+  input[type=text], textarea { flex:1; background:#0c0e12; color:var(--text); border:1px solid var(--line);
+         border-radius:8px; padding:10px 12px; font:inherit; }
+  textarea { resize:vertical; min-height:64px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 18px;
+           font:inherit; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:default; }
+  button.ghost { background:var(--chip); color:var(--text); font-weight:500; font-size:13px; }
+  .apps { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:10px; margin-top:14px; }
+  .appcard { background:#0c0e12; border:1px solid var(--line); border-radius:10px; padding:12px; cursor:pointer; }
+  .appcard:hover, .appcard.sel { border-color:var(--accent); }
+  .appcard .t { font-weight:600; font-size:14px; } .appcard .d { color:var(--dim); font-size:12px; margin-top:2px; }
+  .presets { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
+  .muted { color:var(--dim); font-size:13px; }
+  .stage { display:flex; align-items:center; gap:10px; padding:4px 0; font-size:14px; }
+  .spin { width:14px; height:14px; border:2px solid var(--line); border-top-color:var(--accent);
+          border-radius:50%; animation:r 0.8s linear infinite; } @keyframes r { to { transform:rotate(360deg);} }
+  .done-ic { color:var(--pos); } .err { color:var(--neg); white-space:pre-wrap; }
+  .sentbar { display:flex; height:14px; border-radius:7px; overflow:hidden; margin:8px 0 4px; }
+  .sentbar div { height:100%; } .legend { display:flex; gap:14px; font-size:12px; color:var(--dim); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; }
+  .theme { border-left:3px solid var(--neu); padding:6px 12px; margin:8px 0; background:#0c0e12; border-radius:0 8px 8px 0; }
+  .theme.positive { border-color:var(--pos); } .theme.negative { border-color:var(--neg); }
+  .badge { font-size:11px; padding:2px 8px; border-radius:10px; background:var(--chip); color:var(--dim); margin-left:8px; }
+  blockquote { margin:10px 0; padding:10px 14px; background:#0c0e12; border-radius:8px; border:1px solid var(--line); font-size:13.5px; }
+  blockquote .meta { color:var(--dim); font-size:12px; margin-top:6px; }
+  .banner { font-size:12px; color:var(--dim); border-top:1px solid var(--line); margin-top:16px; padding-top:10px; }
+  .pill { font-size:11px; background:var(--chip); color:var(--dim); padding:2px 10px; border-radius:10px; }
+  #summary { font-size:15.5px; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Play Store Review Analysis</h1>
+  <p class="sub">Ask anything about any app's reviews — answers grounded in real, cited reviews. <span id="llmMode" class="pill"></span></p>
+
+  <div class="panel">
+    <div class="row">
+      <input id="q" type="text" placeholder="Search an app (e.g. 'fitness tracker') or paste a package id" maxlength="200">
+      <button id="searchBtn">Search</button>
+    </div>
+    <div id="apps" class="apps"></div>
+  </div>
+
+  <div id="askPanel" class="panel hidden">
+    <div id="pickedApp" class="muted" style="margin-bottom:8px"></div>
+    <div class="presets" id="presets"></div>
+    <div class="row">
+      <textarea id="question" maxlength="500" placeholder="Your question about this app's reviews…"></textarea>
+    </div>
+    <div class="row" style="margin-top:10px; align-items:center">
+      <button id="askBtn">Analyze</button>
+      <span class="muted">country=in · lang=en · cached re-asks are instant</span>
+    </div>
+  </div>
+
+  <div id="progressPanel" class="panel hidden"></div>
+  <div id="resultPanel" class="panel hidden"></div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls;
+                                 if (text !== undefined) n.textContent = text; return n; };
+const COUNTRY = "in", LANG = "en";
+let picked = null, pollTimer = null;
+
+const PRESETS = [
+  "What do users complain about most?",
+  "What do people love about this app?",
+  "What features are users asking for?",
+  "Did the latest update upset users?",
+  "Summarize positive vs negative themes",
+];
+
+fetch("/api/health").then(r => r.json()).then(h => { $("llmMode").textContent = "engine: " + h.llm; });
+
+PRESETS.forEach(p => {
+  const b = el("button", "ghost", p);
+  b.onclick = () => { $("question").value = p; };
+  $("presets").appendChild(b);
+});
+
+$("searchBtn").onclick = doSearch;
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+$("askBtn").onclick = doAnalyze;
+
+async function doSearch() {
+  const q = $("q").value.trim();
+  if (!q) return;
+  $("searchBtn").disabled = true;
+  $("apps").replaceChildren(el("div", "muted", "Searching…"));
+  try {
+    // A bare package id (has dots, no spaces) can be analyzed directly.
+    if (/^[a-zA-Z0-9._]+$/.test(q) && q.includes(".")) {
+      pickApp({ app_id: q, title: q, score: null, developer: "(direct package id)" });
+    }
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&country=${COUNTRY}&lang=${LANG}`);
+    if (!res.ok) throw new Error((await res.json()).detail || res.status);
+    const apps = await res.json();
+    $("apps").replaceChildren();
+    if (!apps.length) $("apps").appendChild(el("div", "muted", "No apps found."));
+    apps.forEach(a => {
+      const card = el("div", "appcard");
+      card.appendChild(el("div", "t", a.title || a.app_id));
+      card.appendChild(el("div", "d", `★ ${a.score ?? "?"} · ${a.installs ?? "?"} · ${a.developer ?? ""}`));
+      card.appendChild(el("div", "d", a.app_id));
+      card.onclick = () => { document.querySelectorAll(".appcard").forEach(c => c.classList.remove("sel"));
+                             card.classList.add("sel"); pickApp(a); };
+      $("apps").appendChild(card);
+    });
+  } catch (e) {
+    $("apps").replaceChildren(el("div", "err", "Search failed: " + e.message));
+  } finally { $("searchBtn").disabled = false; }
+}
+
+function pickApp(a) {
+  picked = a;
+  $("askPanel").classList.remove("hidden");
+  $("pickedApp").textContent = `App: ${a.title || a.app_id} (${a.app_id})`;
+  $("askPanel").scrollIntoView({ behavior: "smooth" });
+}
+
+async function doAnalyze() {
+  if (!picked) return;
+  const question = $("question").value.trim();
+  if (question.length < 3) { alert("Please enter a question (3+ characters)."); return; }
+  $("askBtn").disabled = true;
+  clearInterval(pollTimer);
+  $("resultPanel").classList.add("hidden");
+  showStage("Submitting…", true);
+  try {
+    const res = await fetch("/api/analyze", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ app_id: picked.app_id, question, country: COUNTRY, lang: LANG }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || res.status);
+    const out = await res.json();
+    if (out.cache_hit && out.result) { showStage("Answered from cache (free).", false); renderResult(out.result); return; }
+    pollTimer = setInterval(() => poll(out.job_id), 1200);
+  } catch (e) {
+    showError("Submit failed: " + e.message);
+  }
+}
+
+async function poll(jobId) {
+  try {
+    const res = await fetch(`/api/jobs/${jobId}`);
+    if (!res.ok) throw new Error(res.status);
+    const j = await res.json();
+    if (j.status === "queued") showStage("Queued…", true);
+    else if (j.status === "scraping") showStage(`Fetching reviews… ${j.progress || 0} so far`, true);
+    else if (j.status === "analyzing") showStage("Analyzing reviews…", true);
+    else if (j.status === "done") { clearInterval(pollTimer); showStage("Done.", false); renderResult(j.result); }
+    else if (j.status === "error") { clearInterval(pollTimer); showError("Analysis failed: " + (j.error || "unknown")); }
+  } catch (e) { clearInterval(pollTimer); showError("Lost contact with the job: " + e.message); }
+}
+
+function showStage(text, spinning) {
+  const p = $("progressPanel");
+  p.classList.remove("hidden");
+  const stage = el("div", "stage");
+  stage.appendChild(spinning ? el("div", "spin") : el("span", "done-ic", "✓"));
+  stage.appendChild(el("span", null, text));
+  p.replaceChildren(stage);
+  $("askBtn").disabled = spinning;
+}
+
+function showError(msg) {
+  $("progressPanel").classList.remove("hidden");
+  $("progressPanel").replaceChildren(el("div", "err", msg));
+  $("askBtn").disabled = false;
+}
+
+function renderResult(r) {
+  $("askBtn").disabled = false;
+  const p = $("resultPanel");
+  p.classList.remove("hidden");
+  p.replaceChildren();
+  const a = r.answer || {};
+
+  const head = el("div", "muted");
+  head.textContent = `${r.app.title || r.app.app_id} · ★${r.app.score ?? "?"} · ${r.snapshot.review_count} reviews analyzed · model: ${r.model}`;
+  p.appendChild(head);
+
+  p.appendChild(el("h2", null, "Answer"));
+  const sum = el("div"); sum.id = "summary"; sum.textContent = a.summary || "(no summary)";
+  p.appendChild(sum);
+  if (a.not_enough_data) p.appendChild(el("div", "err", "⚠ The reviews don't contain enough evidence for a confident answer."));
+
+  const s = a.sentiment_breakdown;
+  if (s) {
+    p.appendChild(el("h3", null, `Sentiment (from ${s.counted} star ratings)`));
+    const bar = el("div", "sentbar");
+    [["pos", s.positive_pct], ["neu", s.neutral_pct], ["neg", s.negative_pct]].forEach(([k, v]) => {
+      const seg = el("div"); seg.style.width = (v || 0) + "%";
+      seg.style.background = `var(--${k})`; bar.appendChild(seg);
+    });
+    p.appendChild(bar);
+    const lg = el("div", "legend");
+    [["pos", "positive", s.positive_pct], ["neu", "neutral", s.neutral_pct], ["neg", "negative", s.negative_pct]]
+      .forEach(([k, label, v]) => {
+        const item = el("span");
+        const dot = el("span", "dot"); dot.style.background = `var(--${k})`;
+        item.appendChild(dot); item.appendChild(document.createTextNode(`${label} ${v ?? 0}%`));
+        lg.appendChild(item);
+      });
+    p.appendChild(lg);
+  }
+
+  if ((a.themes || []).length) {
+    p.appendChild(el("h3", null, "Themes"));
+    a.themes.forEach(t => {
+      const box = el("div", "theme " + (t.polarity === "positive" ? "positive" : t.polarity === "negative" ? "negative" : ""));
+      const line = el("div", null, t.label || "");
+      line.appendChild(el("span", "badge", `${t.polarity || "?"} · ${t.prevalence || "?"}`));
+      box.appendChild(line);
+      p.appendChild(box);
+    });
+  }
+
+  if ((a.supporting_quotes || []).length) {
+    p.appendChild(el("h3", null, "Evidence (verified quotes)"));
+    a.supporting_quotes.forEach(qt => {
+      const bq = el("blockquote");
+      bq.appendChild(el("div", null, `“${qt.quote}”`));
+      bq.appendChild(el("div", "meta", `★${qt.stars ?? "?"} · ${qt.date || "?"} · review ${qt.id}`));
+      p.appendChild(bq);
+    });
+  }
+
+  const caveats = [...(a.caveats || [])];
+  if (a.data_quality) caveats.push(a.data_quality);
+  if (caveats.length) {
+    const b = el("div", "banner");
+    caveats.forEach(c => b.appendChild(el("div", null, "ⓘ " + c)));
+    p.appendChild(b);
+  }
+  p.scrollIntoView({ behavior: "smooth" });
+}
+</script>
+</body>
+</html>
