@@ -24,6 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1"]  # prod database driver (postgresql+psycopg://)
 dev = [
   "ruff>=0.6",
   "pytest>=8",
