@@ -17,7 +17,8 @@ dependencies = [
   "fastapi>=0.111",
   "uvicorn>=0.30",
   "sqlalchemy>=2.0",
-  "google-genai>=1.0",
+  "google-genai>=1.0",  # legacy Gemini provider path
+  "requests>=2.32",  # OpenAI-compatible (OCI GenAI) provider path
 ]
 
 [project.optional-dependencies]

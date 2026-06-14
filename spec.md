@@ -80,9 +80,12 @@ Top Praises, Feature Requests, Sentiment Summary, What Changed in Latest Update)
   Gemini run in a **separate worker process**, never the web process.
 
 ### 4.3 LLM analysis
-- Default model **`gemini-2.5-flash-lite`**; escalate to `gemini-2.5-flash` on hard
-  synthesis or schema-validation failure; Pro only behind an explicit premium gate.
-  Never default to Pro.
+- **Provider is pluggable** (config, not code): `openai_compatible` (Oracle OCI GenAI —
+  default `xai.grok-3-mini`, see `OCI_GENAI_INTEGRATION.md`) → legacy `gemini`
+  (`gemini-2.5-flash-lite`) → `stub` (no-LLM keyword fallback, always works locally).
+  The same grounding prompt, JSON schema, and quote verification apply to every provider.
+  Reasoning models (Grok) need extra output-token headroom (reasoning tokens consume the
+  budget); the OCI adapter sets a larger `max_tokens`. Never default to a heavy/Pro tier.
 - **Context = curated sample**, not the full corpus: most-recent N + most-helpful
   (thumbs-up) N + stratified sample across 1–5 stars / recent versions, capped at a fixed
   token budget (~40K). RAG embeddings are the documented scale-up path, not MVP.
