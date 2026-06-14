@@ -24,7 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import analysis as an
-from . import llm
+from . import llm, llm_openai
 from .config import Settings, get_settings
 from .db import (
     Analysis,
@@ -172,27 +172,37 @@ def _analyze(session: Session, job: Job, snap: Snapshot, settings: Settings) -> 
     curated = an.curate_reviews(reviews)
     lines = an.format_review_lines(curated)
 
-    if settings.gemini_api_key:
-        estimated = llm.cost_usd(
-            settings.gemini_model, llm.estimate_tokens(lines), llm.MAX_OUTPUT_TOKENS
-        )
-        if today_spend_usd(session) + estimated > settings.global_daily_spend_cap_usd:
-            raise SpendCapExceeded(
-                f"daily Gemini spend cap (${settings.global_daily_spend_cap_usd}) reached"
-            )
-        payload, usage = llm.gemini_analyze(
-            job.question, lines, api_key=settings.gemini_api_key, model=settings.gemini_model
-        )
-        payload = an.verify_quotes(
-            payload, {str(r["review_id"]): str(r["text"] or "") for r in reviews}
-        )
-        model = settings.gemini_model
-        cost = llm.cost_usd(model, usage["tokens_in"], usage["tokens_out"])
-        event = "gemini_call"
-    else:
+    provider = settings.provider()
+    if provider == "stub":
         payload = an.stub_analysis(job.question, curated)
         usage = {"tokens_in": 0, "tokens_out": 0}
         model, cost, event = "stub", 0.0, "stub"
+    else:
+        model = settings.llm_model if provider == "openai_compatible" else settings.gemini_model
+        # Spend kill-switch: estimate cost BEFORE spending; block at the daily cap (spec §4.4).
+        estimated = llm.cost_usd(model, llm.estimate_tokens(lines), llm.MAX_OUTPUT_TOKENS)
+        if today_spend_usd(session) + estimated > settings.global_daily_spend_cap_usd:
+            raise SpendCapExceeded(
+                f"daily LLM spend cap (${settings.global_daily_spend_cap_usd}) reached"
+            )
+        if provider == "openai_compatible":
+            payload, usage = llm_openai.openai_compatible_analyze(
+                job.question,
+                lines,
+                base_url=settings.llm_base_url,
+                api_key=settings.llm_api_key,
+                compartment_id=settings.llm_compartment_id,
+                model=model,
+            )
+        else:  # gemini
+            payload, usage = llm.gemini_analyze(
+                job.question, lines, api_key=settings.gemini_api_key, model=model
+            )
+        payload = an.verify_quotes(
+            payload, {str(r["review_id"]): str(r["text"] or "") for r in reviews}
+        )
+        cost = llm.cost_usd(model, usage["tokens_in"], usage["tokens_out"])
+        event = provider
 
     payload["sentiment_breakdown"] = sentiment
     payload["data_quality"] = (

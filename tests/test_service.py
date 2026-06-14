@@ -40,7 +40,16 @@ def service(tmp_path, monkeypatch):
     """A TestClient + session_factory wired to tmp SQLite and a fully mocked scraper."""
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/test.db")
     monkeypatch.setenv("DEV_INPROCESS_WORKER", "0")  # tests drive the worker manually
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    # Hermetic: blank all provider vars so the developer's real .env (loaded by
+    # get_settings) can't leak in and flip the provider away from the stub default.
+    for var in (
+        "GEMINI_API_KEY",
+        "LLM_PROVIDER",
+        "LLM_API_KEY",
+        "LLM_BASE_URL",
+        "LLM_COMPARTMENT_ID",
+    ):
+        monkeypatch.setenv(var, "")
     config_mod.get_settings.cache_clear()
 
     import playstore_review_service.webapp as webapp_mod
@@ -194,6 +203,57 @@ def test_spend_cap_blocks_gemini_calls(service, monkeypatch):
     out = client.get(f"/api/jobs/{body['job_id']}").json()
     assert out["status"] == "error"
     assert "spend cap" in out["error"]
+    config_mod.get_settings.cache_clear()
+
+
+def test_openai_compatible_provider_used_when_configured(service, monkeypatch):
+    """With OCI env configured, the worker routes through the OpenAI-compatible adapter,
+    records the model, and still applies quote verification."""
+    client, sf = service
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_API_KEY", "fake-token")
+    monkeypatch.setenv("LLM_BASE_URL", "https://oci.example/openai/v1")
+    monkeypatch.setenv("LLM_COMPARTMENT_ID", "ocid1.tenancy.oc1..test")
+    monkeypatch.setenv("LLM_CHEAP_MODEL", "xai.grok-3-mini")
+    config_mod.get_settings.cache_clear()
+
+    import playstore_review_service.worker as worker_mod
+
+    calls: dict = {}
+
+    def fake_oci(question, lines, *, base_url, api_key, compartment_id, model, **kw):
+        calls["model"] = model
+        calls["compartment_id"] = compartment_id
+        return (
+            {
+                "summary": "OCI Grok: crashes dominate the negative reviews.",
+                "not_enough_data": False,
+                "themes": [],
+                # real substring of a fixture review (r0 is 1★ "keeps crashing constantly")
+                "supporting_quotes": [
+                    {"id": "r0", "quote": "keeps crashing constantly", "stars": 1},
+                    {"id": "r0", "quote": "this quote is fabricated", "stars": 1},
+                ],
+                "caveats": [],
+            },
+            {"tokens_in": 100, "tokens_out": 20},
+        )
+
+    monkeypatch.setattr(worker_mod.llm_openai, "openai_compatible_analyze", fake_oci)
+
+    body = client.post("/api/analyze", json={"app_id": APP_ID, "question": "what is wrong?"}).json()
+    process_one(sf)
+    out = client.get(f"/api/jobs/{body['job_id']}").json()
+
+    assert out["status"] == "done"
+    assert calls["model"] == "xai.grok-3-mini"
+    assert calls["compartment_id"] == "ocid1.tenancy.oc1..test"
+    answer = out["result"]["answer"]
+    assert out["result"]["model"] == "xai.grok-3-mini"
+    assert answer["summary"].startswith("OCI Grok")
+    # quote verification still runs: the fabricated quote is dropped, the real one kept
+    assert [q["quote"] for q in answer["supporting_quotes"]] == ["keeps crashing constantly"]
+    assert answer["sentiment_breakdown"]["source"] == "star_ratings"
     config_mod.get_settings.cache_clear()
 
 

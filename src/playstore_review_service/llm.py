@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -21,8 +22,12 @@ logger = logging.getLogger(__name__)
 MODEL_PRICES = {
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),
+    # OCI GenAI / xAI Grok (approximate; for the spend-cap ESTIMATE only, not billing).
+    "xai.grok-3-mini": (0.30, 0.50),
+    "xai.grok-3": (3.00, 15.00),
+    "xai.grok-4": (3.00, 15.00),
 }
-DEFAULT_PRICE = (0.30, 2.50)  # unknown models estimate at flash rates (conservative)
+DEFAULT_PRICE = (1.00, 5.00)  # unknown models estimate conservatively (cap is a safety net)
 MAX_OUTPUT_TOKENS = 2048
 
 SYSTEM_PROMPT = """\
@@ -89,6 +94,45 @@ def cost_usd(model: str, tokens_in: int, tokens_out: int) -> float:
     return tokens_in * price_in / 1_000_000 + tokens_out * price_out / 1_000_000
 
 
+def extract_json(text: str) -> dict[str, Any]:
+    """Parse a JSON object from model output, tolerating ```json fences / surrounding prose.
+
+    Gateways that don't honor structured-output (spec §4.3 / OCI note) return JSON as text,
+    sometimes fenced. Raises LLMError (type-name only) on failure — never echoes the payload.
+    """
+    s = text.strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z]*\n?", "", s)
+        s = re.sub(r"\n?```$", "", s.strip())
+    start, end = s.find("{"), s.rfind("}")
+    if start != -1 and end > start:
+        s = s[start : end + 1]
+    try:
+        payload = json.loads(s)
+    except Exception as exc:
+        raise LLMError(f"llm response parse failed: {type(exc).__name__}") from exc
+    if not isinstance(payload, dict) or "summary" not in payload:
+        raise LLMError("llm response schema mismatch")
+    return payload
+
+
+def normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Fill the optional keys so downstream rendering is uniform across providers."""
+    payload.setdefault("themes", [])
+    payload.setdefault("supporting_quotes", [])
+    payload.setdefault("caveats", [])
+    payload.setdefault("not_enough_data", False)
+    return payload
+
+
+def schema_instruction() -> str:
+    """Schema injected into the prompt for gateways without `response_format` (spec §4.3)."""
+    return (
+        "Return ONLY a JSON object (no markdown fences, no prose) matching this JSON Schema:\n"
+        + json.dumps(ANALYSIS_SCHEMA)
+    )
+
+
 def build_prompt(question: str, review_lines: str) -> str:
     # Delimiter look-alikes are already stripped from review text upstream.
     return (
@@ -137,18 +181,8 @@ def gemini_analyze(
     except Exception as exc:
         raise LLMError(f"gemini call failed: {type(exc).__name__}") from exc
 
-    try:
-        payload = json.loads(response.text)
-        if not isinstance(payload, dict) or "summary" not in payload:
-            raise ValueError("schema mismatch")
-    except Exception as exc:
-        raise LLMError(f"gemini response parse failed: {type(exc).__name__}") from exc
-
+    payload = normalize_payload(extract_json(response.text))
     usage = getattr(response, "usage_metadata", None)
     tokens_in = getattr(usage, "prompt_token_count", None) or estimate_tokens(prompt)
     tokens_out = getattr(usage, "candidates_token_count", None) or estimate_tokens(response.text)
-    payload.setdefault("themes", [])
-    payload.setdefault("supporting_quotes", [])
-    payload.setdefault("caveats", [])
-    payload.setdefault("not_enough_data", False)
     return payload, {"tokens_in": int(tokens_in), "tokens_out": int(tokens_out)}

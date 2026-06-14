@@ -63,7 +63,13 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health")
     def health() -> dict:
-        return {"ok": True, "llm": "gemini" if settings.gemini_api_key else "stub (no key set)"}
+        provider = settings.provider()
+        detail = {
+            "openai_compatible": f"OCI/OpenAI-compatible ({settings.llm_model})",
+            "gemini": f"gemini ({settings.gemini_model})",
+            "stub": "stub (no LLM configured)",
+        }[provider]
+        return {"ok": True, "provider": provider, "llm": detail}
 
     @app.get("/api/search")
     def search(q: str, country: str = "us", lang: str = "en") -> list[dict]:
