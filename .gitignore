@@ -42,8 +42,14 @@ require.txt
 secrets/
 *-service-account*.json
 
-# --- Harness runtime state ---
-.claude/state/
-.claude/sessions/
-.claude/logs/
+# --- Frontend (React/Vite) ---
+frontend/node_modules/
+frontend/dist/
+# built SPA emitted into the package (produced by `cd frontend && npm run build`)
+src/playstore_review_service/static/spa/
+
+# --- Harness runtime state (anywhere in the tree) ---
+**/.claude/state/
+**/.claude/sessions/
+**/.claude/logs/
 out/
