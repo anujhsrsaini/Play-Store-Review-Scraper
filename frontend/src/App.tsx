@@ -25,15 +25,28 @@ export default function App() {
   const authEnabled = health?.auth ?? false;
 
   return (
-    <div className="min-h-full">
-      <Header me={me} authEnabled={authEnabled} />
-      <main className="mx-auto max-w-3xl px-4 py-6">
-        <Routes>
-          <Route path="/" element={<Home me={me} authEnabled={authEnabled} onUsed={loadMe} />} />
-          <Route path="/a/:id" element={<Shared />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
+    <div className="grain relative min-h-full overflow-x-hidden">
+      <Aurora />
+      <div className="relative z-[2]">
+        <Header me={me} authEnabled={authEnabled} />
+        <main className="mx-auto max-w-3xl px-4 py-8">
+          <Routes>
+            <Route path="/" element={<Home me={me} authEnabled={authEnabled} onUsed={loadMe} />} />
+            <Route path="/a/:id" element={<Shared />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </main>
+      </div>
     </div>
+  );
+}
+
+function Aurora() {
+  return (
+    <>
+      <div className="aurora-blob left-[-10%] top-[-12%] h-[42vh] w-[42vh] animate-drift bg-indigo-600" />
+      <div className="aurora-blob right-[-8%] top-[6%] h-[38vh] w-[38vh] animate-drift-slow bg-fuchsia-600" />
+      <div className="aurora-blob bottom-[-15%] left-[30%] h-[40vh] w-[40vh] animate-drift bg-cyan-500" />
+    </>
   );
 }

@@ -45,7 +45,7 @@ export function Search({ onPick }: { onPick: (app: AppSummary) => void }) {
         </Button>
       </div>
 
-      {error && <p className="mt-3 text-sm text-neg">{error}</p>}
+      {error && <p className="mt-3 text-sm text-rose-300">{error}</p>}
 
       {loading && (
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -55,24 +55,24 @@ export function Search({ onPick }: { onPick: (app: AppSummary) => void }) {
         </div>
       )}
 
-      {apps && apps.length === 0 && <p className="mt-4 text-sm text-slate-500">No apps found.</p>}
+      {apps && apps.length === 0 && <p className="mt-4 text-sm text-slate-400">No apps found.</p>}
 
       {apps && apps.length > 0 && (
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           {apps.map((a) => (
             <Card
               key={a.app_id}
-              className="flex cursor-pointer items-center gap-3 p-3 transition hover:border-brand hover:shadow"
+              className="glass-hover flex cursor-pointer items-center gap-3 p-3"
               onClick={() => onPick(a)}
             >
               {a.icon ? (
-                <img src={a.icon} alt="" className="h-10 w-10 rounded-lg" />
+                <img src={a.icon} alt="" className="h-10 w-10 rounded-lg ring-1 ring-white/10" />
               ) : (
-                <div className="h-10 w-10 rounded-lg bg-slate-100" />
+                <div className="h-10 w-10 rounded-lg bg-white/10" />
               )}
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium text-slate-900">{a.title ?? a.app_id}</div>
-                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                <div className="truncate text-sm font-medium text-slate-100">{a.title ?? a.app_id}</div>
+                <div className="flex items-center gap-1.5 text-xs text-slate-400">
                   {a.score != null && (
                     <span className="inline-flex items-center gap-0.5">
                       <Star className="h-3 w-3 fill-amber-400 text-amber-400" />

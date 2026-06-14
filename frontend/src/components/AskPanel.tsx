@@ -28,9 +28,9 @@ export function AskPanel({
   return (
     <Card className="p-4 sm:p-5">
       <div className="mb-3 flex items-center gap-2">
-        {app.icon && <img src={app.icon} alt="" className="h-8 w-8 rounded-lg" />}
-        <span className="text-sm font-medium text-slate-800">{app.title ?? app.app_id}</span>
-        <span className="truncate text-xs text-slate-400">{app.app_id}</span>
+        {app.icon && <img src={app.icon} alt="" className="h-8 w-8 rounded-lg ring-1 ring-white/10" />}
+        <span className="text-sm font-medium text-slate-100">{app.title ?? app.app_id}</span>
+        <span className="truncate text-xs text-slate-500">{app.app_id}</span>
       </div>
 
       <div className="mb-3 flex flex-wrap gap-2">
@@ -39,7 +39,7 @@ export function AskPanel({
             key={p}
             onClick={() => setQuestion(p)}
             disabled={busy}
-            className="rounded-full bg-slate-100 px-3 py-1 text-[13px] text-slate-600 transition hover:bg-slate-200 disabled:opacity-50"
+            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[13px] text-slate-300 transition hover:border-indigo-400/40 hover:bg-white/10 disabled:opacity-50"
           >
             {p}
           </button>
@@ -61,7 +61,7 @@ export function AskPanel({
         <Button onClick={submit} loading={busy} disabled={question.trim().length < 3}>
           <Sparkles className="h-4 w-4" /> Analyze
         </Button>
-        <span className="text-xs text-slate-400">⌘/Ctrl+Enter · cached re-asks are free</span>
+        <span className="text-xs text-slate-500">⌘/Ctrl+Enter · cached re-asks are free</span>
       </div>
     </Card>
   );

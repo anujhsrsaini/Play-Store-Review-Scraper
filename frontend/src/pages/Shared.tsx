@@ -20,11 +20,11 @@ export function Shared() {
 
   return (
     <div className="space-y-4">
-      <Link to="/" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
+      <Link to="/" className="inline-flex items-center gap-1 text-sm text-slate-400 transition hover:text-white">
         <ArrowLeft className="h-4 w-4" /> Analyze your own app
       </Link>
       {error ? (
-        <Card className="p-6 text-sm text-slate-600">{error}</Card>
+        <Card className="p-6 text-sm text-slate-300">{error}</Card>
       ) : result ? (
         <Result result={result} />
       ) : (
