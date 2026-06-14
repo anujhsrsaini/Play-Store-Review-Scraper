@@ -91,6 +91,7 @@ def create_app() -> FastAPI:
                 "free": a.free,
             }
             for a in apps
+            if a.app_id  # drop featured/cluster results that come back without a usable id
         ]
 
     @app.post("/api/analyze")

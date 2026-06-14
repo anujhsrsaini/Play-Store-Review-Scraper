@@ -113,7 +113,7 @@ async function doSearch() {
       pickApp({ app_id: q, title: q, score: null, developer: "(direct package id)" });
     }
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&country=${COUNTRY}&lang=${LANG}`);
-    if (!res.ok) throw new Error((await res.json()).detail || res.status);
+    if (!res.ok) throw new Error(await apiError(res));
     const apps = await res.json();
     $("apps").replaceChildren();
     if (!apps.length) $("apps").appendChild(el("div", "muted", "No apps found."));
@@ -131,7 +131,19 @@ async function doSearch() {
   } finally { $("searchBtn").disabled = false; }
 }
 
+async function apiError(res) {
+  try {
+    const j = await res.json();
+    if (typeof j.detail === "string") return j.detail;
+    if (Array.isArray(j.detail)) return j.detail.map(d => d.msg || JSON.stringify(d)).join("; ");
+    if (j.error) return j.error;
+    if (j.detail) return JSON.stringify(j.detail);
+  } catch (_e) { /* body was not JSON */ }
+  return "HTTP " + res.status;
+}
+
 function pickApp(a) {
+  if (!a.app_id) { alert("That result has no package id and can't be analyzed — pick another or paste a package id."); return; }
   picked = a;
   $("askPanel").classList.remove("hidden");
   $("pickedApp").textContent = `App: ${a.title || a.app_id} (${a.app_id})`;
@@ -151,7 +163,7 @@ async function doAnalyze() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ app_id: picked.app_id, question, country: COUNTRY, lang: LANG }),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || res.status);
+    if (!res.ok) throw new Error(await apiError(res));
     const out = await res.json();
     if (out.cache_hit && out.result) { showStage("Answered from cache (free).", false); renderResult(out.result); return; }
     pollTimer = setInterval(() => poll(out.job_id), 1200);
