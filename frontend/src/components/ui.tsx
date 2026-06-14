@@ -4,13 +4,14 @@ import * as React from "react";
 import { cn } from "@/lib/cn";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50 disabled:pointer-events-none",
+  "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/50 disabled:opacity-50 disabled:pointer-events-none active:scale-[.98]",
   {
     variants: {
       variant: {
-        primary: "bg-brand text-brand-fg hover:bg-indigo-700",
-        ghost: "bg-slate-100 text-slate-700 hover:bg-slate-200",
-        outline: "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+        primary:
+          "bg-brand-grad text-white shadow-glow-sm hover:shadow-glow hover:brightness-110",
+        ghost: "border border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.09]",
+        outline: "border border-white/15 bg-transparent text-slate-200 hover:bg-white/[0.06]",
       },
       size: { md: "h-10 px-4 text-sm", sm: "h-8 px-3 text-[13px]", lg: "h-11 px-5 text-[15px]" },
     },
@@ -38,12 +39,7 @@ export function Button({ className, variant, size, loading, children, disabled, 
 }
 
 export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn("rounded-2xl border border-slate-200 bg-white shadow-card", className)}
-      {...props}
-    />
-  );
+  return <div className={cn("glass animate-fade-up", className)} {...props} />;
 }
 
 export function Badge({
@@ -52,9 +48,9 @@ export function Badge({
   ...props
 }: React.HTMLAttributes<HTMLSpanElement> & { tone?: "neutral" | "positive" | "negative" }) {
   const tones = {
-    neutral: "bg-slate-100 text-slate-600",
-    positive: "bg-green-50 text-green-700",
-    negative: "bg-red-50 text-red-700",
+    neutral: "bg-white/10 text-slate-300 ring-1 ring-inset ring-white/10",
+    positive: "bg-emerald-400/10 text-emerald-300 ring-1 ring-inset ring-emerald-400/20",
+    negative: "bg-rose-400/10 text-rose-300 ring-1 ring-inset ring-rose-400/20",
   };
   return (
     <span
@@ -64,34 +60,21 @@ export function Badge({
   );
 }
 
+const fieldBase =
+  "w-full rounded-xl border border-white/10 bg-white/[0.04] text-slate-100 shadow-inner placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/40 focus-visible:border-indigo-400/40";
+
 export function Textarea({ className, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return (
-    <textarea
-      className={cn(
-        "w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
-        className,
-      )}
-      {...props}
-    />
-  );
+  return <textarea className={cn(fieldBase, "resize-y px-3.5 py-2.5 text-sm", className)} {...props} />;
 }
 
 export function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      className={cn(
-        "h-11 w-full rounded-lg border border-slate-300 bg-white px-4 text-sm shadow-sm placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
-        className,
-      )}
-      {...props}
-    />
-  );
+  return <input className={cn(fieldBase, "h-12 px-4 text-sm", className)} {...props} />;
 }
 
 export function Spinner({ className }: { className?: string }) {
-  return <Loader2 className={cn("h-4 w-4 animate-spin text-brand", className)} />;
+  return <Loader2 className={cn("h-4 w-4 animate-spin text-indigo-300", className)} />;
 }
 
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("animate-pulse rounded-md bg-slate-200", className)} />;
+  return <div className={cn("animate-pulse rounded-md bg-white/10", className)} />;
 }
