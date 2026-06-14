@@ -87,6 +87,25 @@ cost/security controls (Phase 3) before going live.
 
 ---
 
+## Phase 6: Public launch — closed LinkedIn network (Oracle Ampere + subdomain)
+
+Decisions locked: **React UI** (Vite + Tailwind + shadcn/ui + Recharts, light theme,
+served static by FastAPI) · **Google sign-in** + per-user quota · host = **Oracle Ampere
+A1 Always Free** (scraping from a datacenter IP already verified working) · **Caddy** for
+auto-TLS on the owner's subdomain. Closed pro audience → light gating, not full beta infra.
+
+| Task | 内容 | DoD | Depends | Status |
+|------|------|-----|---------|--------|
+| 6.1 | **API enrichment**: surface app `icon` + `histogram` in search/result; add shareable analysis permalink (`GET /api/analysis/{id}`). `[tdd:required]` | Tests: icon+histogram in payloads; permalink returns a cached analysis | 2.5 | cc:TODO |
+| 6.2 | **Google OAuth + sessions** (Authlib): `User` table, `/auth/login|callback|logout`, `/api/me`. Auth-optional locally (no creds → local dev user), required in prod. `[tdd:required]` | Tests (mocked token): callback creates user + session; protected route 401 w/o session; local fallback works | 1.1 | cc:TODO |
+| 6.3 | **Per-user daily quota + per-IP rate limit**, quota enforced on cache-miss; `/api/me` returns remaining. `[tdd:required]` | Tests: quota decrements on cache-miss only; 429 past quota; rate-limit per identity | 6.2, 2.5 | cc:TODO |
+| 6.4 | **Real OCI cost**: record `cost_in_usd_ticks` from the response into `usage_log` (replaces estimate). `[tdd:required]` | Test: usage row cost matches OCI-reported ticks | 2.1 | cc:TODO |
+| 6.5 | **React SPA**: landing/search/app-picker(icons)/ask(presets)/progress/result(donut+histogram+theme cards+quotes+caveats)/sign-in/quota chip/share/responsive; built to static, served by FastAPI. `[tdd:skip:frontend-spa]` | `npm run build` → FastAPI serves it; full flow works against the API | 6.1, 6.2, 6.3 | cc:TODO |
+| 6.6 | **Deploy scaffold**: multi-stage Dockerfile (node build → python runtime) + docker-compose (web + worker + Postgres + Caddy auto-TLS); env wiring; GitHub Actions build/test gate. `[tdd:skip:deploy-config]` | `docker compose up` runs the stack; CI green on push | 6.5 | cc:TODO |
+| 6.7 | **Owner setup (handoff)**: Google OAuth client + redirect URI; subdomain DNS → Ampere IP; OCI budget cap/alert. `[tdd:skip:owner-config]` | Documented checklist; values supplied to deploy | - | cc:TODO |
+
+---
+
 ## Priority Matrix
 
 - **Required (to go live)**: Phase 0 (all), Phase 1 (all), Phase 2 (all), **Phase 3 (all —

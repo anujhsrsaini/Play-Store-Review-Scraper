@@ -201,7 +201,13 @@ def _analyze(session: Session, job: Job, snap: Snapshot, settings: Settings) -> 
         payload = an.verify_quotes(
             payload, {str(r["review_id"]): str(r["text"] or "") for r in reviews}
         )
-        cost = llm.cost_usd(model, usage["tokens_in"], usage["tokens_out"])
+        # Prefer the provider's real billed cost (OCI ticks) over our price-table estimate.
+        real_cost = usage.get("cost_usd")
+        cost = (
+            float(real_cost)
+            if real_cost is not None
+            else llm.cost_usd(model, usage["tokens_in"], usage["tokens_out"])
+        )
         event = provider
 
     payload["sentiment_breakdown"] = sentiment

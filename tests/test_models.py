@@ -22,11 +22,13 @@ def test_app_info_preserves_market_research_fields(app_raw):
 def test_app_info_carries_gemini_context_fields():
     raw = {
         "appId": "com.x",
+        "icon": "https://example.com/i.png",
         "description": "Long description",
         "summary": "Short blurb",
         "recentChanges": "Fixed crashes; added dark mode",
     }
     info = AppInfo.from_raw(raw)
+    assert info.icon == "https://example.com/i.png"  # surfaced for the UI
     assert info.description == "Long description"
     assert info.summary == "Short blurb"
     assert info.recent_changes == "Fixed crashes; added dark mode"

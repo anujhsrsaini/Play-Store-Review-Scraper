@@ -64,6 +64,7 @@ def service(tmp_path, monkeypatch):
             ratings=1000,
             histogram=[10, 20, 30, 40, 100],
             installs="1,000,000+",
+            icon="https://example.com/icon.png",
         )
 
     def fake_fetch_reviews(app_id, *, country="us", lang="en", max_reviews=500, on_page=None, **kw):
@@ -81,7 +82,15 @@ def service(tmp_path, monkeypatch):
         )
 
     def fake_search(query, **kw):
-        return [AppInfo(app_id=APP_ID, title="Example Calc", score=4.3, installs="1M+")]
+        return [
+            AppInfo(
+                app_id=APP_ID,
+                title="Example Calc",
+                score=4.3,
+                installs="1M+",
+                icon="https://example.com/icon.png",
+            )
+        ]
 
     import playstore_review_service.worker as worker_mod
 
@@ -109,6 +118,22 @@ def test_search_endpoint(service):
     client, _sf = service
     apps = client.get("/api/search", params={"q": "calculator"}).json()
     assert apps[0]["app_id"] == APP_ID
+    assert apps[0]["icon"] == "https://example.com/icon.png"  # surfaced for the UI
+
+
+def test_share_permalink_returns_cached_analysis(service):
+    client, sf = service
+    body = client.post("/api/analyze", json={"app_id": APP_ID, "question": "shareable?"}).json()
+    process_one(sf)
+    done = client.get(f"/api/jobs/{body['job_id']}").json()["result"]
+    analysis_id = done["analysis_id"]
+    assert done["app"]["icon"] == "https://example.com/icon.png"
+    assert done["app"]["histogram"] == [10, 20, 30, 40, 100]
+    # permalink fetch returns the same analysis
+    shared = client.get(f"/api/analysis/{analysis_id}").json()
+    assert shared["analysis_id"] == analysis_id
+    assert shared["answer"]["summary"] == done["answer"]["summary"]
+    assert client.get("/api/analysis/999999").status_code == 404
 
 
 def test_search_rejects_empty_query(service):
