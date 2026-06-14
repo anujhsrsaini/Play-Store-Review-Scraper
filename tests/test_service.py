@@ -314,7 +314,18 @@ def test_spend_cap_exception_importable():
 def test_index_served(service):
     client, _sf = service
     res = client.get("/")
-    assert res.status_code == 200 and "Play Store Review Analysis" in res.text
+    assert res.status_code == 200 and "text/html" in res.headers["content-type"]
+
+
+def test_spa_client_routes_and_api_separation(service):
+    from playstore_review_service.webapp import SPA_DIR
+
+    client, _sf = service
+    if not (SPA_DIR / "index.html").exists():
+        pytest.skip("React SPA not built (run: cd frontend && npm run build)")
+    assert '<div id="root">' in client.get("/").text  # React app at root
+    assert '<div id="root">' in client.get("/a/123").text  # client route → SPA fallback
+    assert client.get("/api/does-not-exist").status_code == 404  # API not shadowed by SPA
 
 
 # --------------------------------------------------------------- auth + quota

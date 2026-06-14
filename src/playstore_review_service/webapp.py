@@ -13,6 +13,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from starlette.middleware.sessions import SessionMiddleware
@@ -37,6 +38,7 @@ from .scraper.errors import InvalidAppId, RateLimitedUpstream, ScraperError
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+SPA_DIR = STATIC_DIR / "spa"  # built React app (gitignored; produced by `npm run build`)
 ACTIVE_STATUSES = ("queued", "scraping", "analyzing")
 
 
@@ -225,9 +227,27 @@ def create_app() -> FastAPI:
             snap = session.get(Snapshot, record.snapshot_id)
             return _result_payload(record, snap)
 
-    @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
+    # Serve the built React SPA when present (built via `frontend && npm run build`);
+    # otherwise fall back to the legacy single-file UI. The catch-all returns index.html
+    # for client-side routes (e.g. /a/:id) while leaving /api and /auth untouched.
+    spa_index = SPA_DIR / "index.html"
+    if spa_index.exists():
+        if (SPA_DIR / "assets").is_dir():
+            app.mount("/assets", StaticFiles(directory=SPA_DIR / "assets"), name="assets")
+
+        @app.get("/{full_path:path}")
+        def spa(full_path: str) -> FileResponse:
+            if full_path.startswith(("api/", "auth/")):
+                raise HTTPException(404, "not found")
+            candidate = SPA_DIR / full_path
+            if full_path and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(spa_index)
+    else:
+
+        @app.get("/")
+        def index() -> FileResponse:
+            return FileResponse(STATIC_DIR / "index.html")
 
     return app
 
