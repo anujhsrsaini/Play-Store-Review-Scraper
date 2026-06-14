@@ -93,8 +93,9 @@ def build_service(tmp_path, monkeypatch, **env):
         "LLM_API_KEY",
         "LLM_BASE_URL",
         "LLM_COMPARTMENT_ID",
-        "GOOGLE_OAUTH_CLIENT_ID",
-        "GOOGLE_OAUTH_CLIENT_SECRET",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "GOOGLE_REDIRECT_URI",
     ):
         monkeypatch.setenv(var, "")
     for key, value in env.items():
@@ -366,8 +367,8 @@ def test_auth_required_when_oauth_configured(tmp_path, monkeypatch):
     with build_service(
         tmp_path,
         monkeypatch,
-        GOOGLE_OAUTH_CLIENT_ID="fake-client-id",
-        GOOGLE_OAUTH_CLIENT_SECRET="fake-client-secret",
+        GOOGLE_CLIENT_ID="fake-client-id",
+        GOOGLE_CLIENT_SECRET="fake-client-secret",
     ) as (client, _sf):
         assert client.get("/api/health").json()["auth"] is True
         # no session → protected endpoints 401, public ones still work

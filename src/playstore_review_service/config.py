@@ -42,9 +42,11 @@ class Settings:
     llm_planner_model: str  # heavy tier, reserved for future deep-analysis use
     # Auth (Google OAuth). When client id/secret are unset, auth is DISABLED and a single
     # local dev user is used — so localhost works with zero setup; prod sets the creds.
-    google_oauth_client_id: str
-    google_oauth_client_secret: str
+    google_client_id: str
+    google_client_secret: str
+    google_redirect_uri: str  # explicit callback URL (prod, behind a TLS proxy); blank = auto
     session_secret: str
+    session_cookie_secure: bool  # set True in prod (HTTPS) so the session cookie is Secure
     per_user_daily_analyses: int
     max_reviews_per_analysis: int
     scrape_cache_ttl_hours: int
@@ -53,7 +55,7 @@ class Settings:
     dev_inprocess_worker: bool
 
     def auth_enabled(self) -> bool:
-        return bool(self.google_oauth_client_id and self.google_oauth_client_secret)
+        return bool(self.google_client_id and self.google_client_secret)
 
     def provider(self) -> str:
         """Resolve the active LLM provider. Order: explicit OpenAI-compatible (OCI) →
@@ -78,9 +80,11 @@ def get_settings() -> Settings:
         llm_compartment_id=os.environ.get("LLM_COMPARTMENT_ID", ""),
         llm_model=os.environ.get("LLM_CHEAP_MODEL", "xai.grok-3-mini"),
         llm_planner_model=os.environ.get("LLM_PLANNER_MODEL", "xai.grok-4"),
-        google_oauth_client_id=os.environ.get("GOOGLE_OAUTH_CLIENT_ID", ""),
-        google_oauth_client_secret=os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", ""),
+        google_client_id=os.environ.get("GOOGLE_CLIENT_ID", ""),
+        google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET", ""),
+        google_redirect_uri=os.environ.get("GOOGLE_REDIRECT_URI", ""),
         session_secret=os.environ.get("SESSION_SECRET", "dev-insecure-session-secret"),
+        session_cookie_secure=os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
         per_user_daily_analyses=int(os.environ.get("PER_USER_DAILY_ANALYSES", "15")),
         max_reviews_per_analysis=int(os.environ.get("MAX_REVIEWS_PER_ANALYSIS", "500")),
         scrape_cache_ttl_hours=int(os.environ.get("SCRAPE_CACHE_TTL_HOURS", "24")),

@@ -69,10 +69,13 @@ def create_app() -> FastAPI:
         title="Play Store Review Analysis", lifespan=lifespan, docs_url=None, redoc_url=None
     )
     app.add_middleware(
-        SessionMiddleware, secret_key=settings.session_secret, same_site="lax", https_only=False
+        SessionMiddleware,
+        secret_key=settings.session_secret,
+        same_site="lax",
+        https_only=settings.session_cookie_secure,
     )
     oauth = auth_mod.make_oauth(settings)
-    auth_mod.setup_auth_routes(app, oauth, session_factory)
+    auth_mod.setup_auth_routes(app, oauth, session_factory, settings)
 
     def current_user(request: Request) -> User:
         return auth_mod.resolve_user(request, session_factory, settings)
@@ -288,6 +291,8 @@ def main() -> None:  # pragma: no cover - `pmr-serve` entrypoint
     logging.basicConfig(level=logging.INFO)
     uvicorn.run(
         "playstore_review_service.webapp:app",
-        host="127.0.0.1",
+        host=os.environ.get("HOST", "127.0.0.1"),  # set 0.0.0.0 in Docker
         port=int(os.environ.get("PORT", "8000")),
+        proxy_headers=True,  # trust X-Forwarded-* from Caddy
+        forwarded_allow_ips="*",
     )

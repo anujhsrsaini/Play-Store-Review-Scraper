@@ -1,0 +1,6 @@
+# Automatic HTTPS (Let's Encrypt) for your subdomain, reverse-proxied to the app.
+# DOMAIN is injected from .env via docker-compose.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:8000
+}

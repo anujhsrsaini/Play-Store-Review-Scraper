@@ -36,8 +36,8 @@ def make_oauth(settings: Settings):
     oauth = OAuth()
     oauth.register(
         name="google",
-        client_id=settings.google_oauth_client_id,
-        client_secret=settings.google_oauth_client_secret,
+        client_id=settings.google_client_id,
+        client_secret=settings.google_client_secret,
         server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
         client_kwargs={"scope": "openid email profile"},
     )
@@ -80,15 +80,17 @@ def analyses_used_today(session: Session, user_id: str) -> int:
     )
 
 
-def setup_auth_routes(app, oauth, session_factory: sessionmaker) -> None:
+def setup_auth_routes(app, oauth, session_factory: sessionmaker, settings: Settings) -> None:
     from fastapi.responses import RedirectResponse
 
     @app.get("/auth/login")
     async def auth_login(request: Request):
         if oauth is None:  # auth disabled — nothing to do
             return RedirectResponse("/")
-        redirect_uri = request.url_for("auth_callback")
-        return await oauth.google.authorize_redirect(request, str(redirect_uri))
+        # Prefer the explicit, registered redirect URI (correct behind a TLS proxy where the
+        # auto-derived URL can come back as http://); fall back to deriving it from the request.
+        redirect_uri = settings.google_redirect_uri or str(request.url_for("auth_callback"))
+        return await oauth.google.authorize_redirect(request, redirect_uri)
 
     @app.get("/auth/callback", name="auth_callback")
     async def auth_callback(request: Request):  # pragma: no cover - needs live Google
