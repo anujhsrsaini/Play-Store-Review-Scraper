@@ -89,6 +89,7 @@ def create_app() -> FastAPI:
                 "installs": a.installs,
                 "developer": a.developer,
                 "free": a.free,
+                "icon": a.icon,
             }
             for a in apps
             if a.app_id  # drop featured/cluster results that come back without a usable id
@@ -170,6 +171,16 @@ def create_app() -> FastAPI:
                 out["result"] = _result_payload(record, snap)
             return out
 
+    @app.get("/api/analysis/{analysis_id}")
+    def get_analysis(analysis_id: int) -> dict:
+        """Shareable permalink: fetch a previously-computed analysis by id."""
+        with session_factory() as session:
+            record = session.get(Analysis, analysis_id)
+            if record is None:
+                raise HTTPException(404, "analysis not found")
+            snap = session.get(Snapshot, record.snapshot_id)
+            return _result_payload(record, snap)
+
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
@@ -188,7 +199,9 @@ def _result_payload(record: Analysis, snap: Snapshot) -> dict:
             "installs": meta.get("installs"),
             "version": meta.get("version"),
             "histogram": meta.get("histogram"),
+            "icon": meta.get("icon"),
         },
+        "analysis_id": record.id,
         "snapshot": {
             "fetched_at": snap.fetched_at.isoformat() + "Z",
             "review_count": snap.review_count,

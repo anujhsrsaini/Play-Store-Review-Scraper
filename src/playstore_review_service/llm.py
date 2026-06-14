@@ -157,7 +157,7 @@ def gemini_analyze(
     api_key: str,
     model: str,
     client: Any | None = None,
-) -> tuple[dict[str, Any], dict[str, int]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Call Gemini with structured output. Returns (payload, {tokens_in, tokens_out}).
 
     ``client`` is injectable for tests; production builds one lazily from the key.

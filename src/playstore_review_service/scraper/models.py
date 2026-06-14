@@ -70,6 +70,7 @@ class AppInfo:
     updated: int | None = None  # epoch seconds
     version: str | None = None
     developer: str | None = None
+    icon: str | None = None  # app icon URL (used by the UI)
     description: str | None = None
     summary: str | None = None
     recent_changes: str | None = None
@@ -96,6 +97,7 @@ class AppInfo:
             updated=raw.get("updated"),
             version=raw.get("version"),
             developer=raw.get("developer"),
+            icon=raw.get("icon"),
             description=raw.get("description"),
             summary=raw.get("summary"),
             recent_changes=raw.get("recentChanges"),

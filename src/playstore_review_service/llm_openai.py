@@ -39,6 +39,7 @@ TEMPERATURE = 0.15
 # tokens BEFORE emitting the answer, so the JSON output needs generous headroom or it
 # truncates mid-object. Larger than the Gemini cap for this reason.
 OCI_MAX_TOKENS = 6000
+USD_PER_TICK = 1e-11  # OCI `cost_in_usd_ticks` → USD (empirically derived; see usage parse)
 
 PostFn = Callable[..., Any]
 
@@ -59,7 +60,7 @@ def openai_compatible_analyze(
     model: str,
     timeout: tuple[int, int] = DEFAULT_TIMEOUT,
     post: PostFn = _default_post,
-) -> tuple[dict[str, Any], dict[str, int]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Call the OpenAI-compatible chat endpoint. Returns (payload, {tokens_in, tokens_out}).
 
     ``post`` is injectable for tests; production uses ``requests.post``.
@@ -102,4 +103,12 @@ def openai_compatible_analyze(
     usage = data.get("usage") or {}
     tokens_in = usage.get("prompt_tokens") or estimate_tokens(str(body["messages"]))
     tokens_out = usage.get("completion_tokens") or estimate_tokens(content)
-    return payload, {"tokens_in": int(tokens_in), "tokens_out": int(tokens_out)}
+    # OCI reports the real billed cost as `cost_in_usd_ticks`. Empirically 1 tick = 1e-11 USD
+    # (a tiny call billing ~$0.0002 reported ~20,060,000 ticks). Prefer this over our estimate.
+    ticks = usage.get("cost_in_usd_ticks")
+    cost_usd = float(ticks) * USD_PER_TICK if ticks is not None else None
+    return payload, {
+        "tokens_in": int(tokens_in),
+        "tokens_out": int(tokens_out),
+        "cost_usd": cost_usd,
+    }

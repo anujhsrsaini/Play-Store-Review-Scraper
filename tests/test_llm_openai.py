@@ -82,7 +82,37 @@ def test_sends_oci_headers_and_openai_body():
     assert "JSON Schema" in captured["body"]["messages"][0]["content"]
     assert captured["timeout"][0] == 10  # (connect, read) tuple
     assert payload["summary"].startswith("Users mostly")
-    assert usage == {"tokens_in": 1234, "tokens_out": 56}
+    assert usage == {"tokens_in": 1234, "tokens_out": 56, "cost_usd": None}
+
+
+def test_real_oci_cost_from_ticks_preferred_over_estimate():
+    resp = _chat_response(
+        json.dumps(ANSWER),
+        usage={"prompt_tokens": 4063, "completion_tokens": 921, "cost_in_usd_ticks": 20060000},
+    )
+    _payload, usage = openai_compatible_analyze(
+        "q",
+        "l",
+        base_url=BASE,
+        api_key="fake-token",
+        compartment_id="c",
+        model="xai.grok-3-mini",
+        post=_capturing_post({}, _Resp(resp)),
+    )
+    assert usage["cost_usd"] == 20060000 * 1e-11  # ~$0.0002, the real billed amount
+
+
+def test_cost_usd_none_when_ticks_absent():
+    _payload, usage = openai_compatible_analyze(
+        "q",
+        "l",
+        base_url=BASE,
+        api_key="fake-token",
+        compartment_id="c",
+        model="m",
+        post=_capturing_post({}, _Resp(_chat_response(json.dumps(ANSWER), usage={}))),
+    )
+    assert usage["cost_usd"] is None  # worker falls back to its estimate
 
 
 def test_parses_json_inside_markdown_fences():
