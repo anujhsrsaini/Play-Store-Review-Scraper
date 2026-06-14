@@ -39,6 +39,15 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # OAuth sub, or "local"
+    email: Mapped[str] = mapped_column(String(320), index=True, default="")
+    name: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Snapshot(Base):
     """One cached scrape of an app's reviews per (app_id, country, lang)."""
 
@@ -74,6 +83,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_job_id)
+    user_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     app_id: Mapped[str] = mapped_column(String(200), index=True)
     country: Mapped[str] = mapped_column(String(8))
     lang: Mapped[str] = mapped_column(String(8))

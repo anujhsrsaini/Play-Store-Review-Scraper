@@ -5,6 +5,8 @@ No network, no LLM key (stub analyzer path), tmp-file SQLite per test session.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -35,77 +37,91 @@ def _fake_reviews(n: int = 30) -> list[Review]:
     return out
 
 
-@pytest.fixture()
-def service(tmp_path, monkeypatch):
-    """A TestClient + session_factory wired to tmp SQLite and a fully mocked scraper."""
+def _fake_get_app(app_id, **kw):
+    if app_id == "com.missing.app":
+        raise AppNotFound(app_id)
+    return AppInfo(
+        app_id=app_id,
+        title="Example Calc",
+        score=4.3,
+        ratings=1000,
+        histogram=[10, 20, 30, 40, 100],
+        installs="1,000,000+",
+        icon="https://example.com/icon.png",
+    )
+
+
+def _fake_fetch_reviews(app_id, *, country="us", lang="en", max_reviews=500, on_page=None, **kw):
+    reviews = _fake_reviews(30)
+    if on_page:
+        on_page(len(reviews))
+    return FetchResult(
+        app_id=app_id,
+        country=country,
+        lang=lang,
+        sort="NEWEST",
+        requested=max_reviews,
+        reviews=reviews,
+        complete=True,
+    )
+
+
+def _fake_search(query, **kw):
+    return [
+        AppInfo(
+            app_id=APP_ID,
+            title="Example Calc",
+            score=4.3,
+            installs="1M+",
+            icon="https://example.com/icon.png",
+        )
+    ]
+
+
+@contextmanager
+def build_service(tmp_path, monkeypatch, **env):
+    """Build a TestClient + session_factory on tmp SQLite with a fully mocked scraper.
+
+    Auth and all LLM provider vars are blanked (hermetic; stub analyzer, auth disabled →
+    local user) unless overridden via **env. Used by the `service` fixture and tests that
+    need custom settings (low quota, auth enabled)."""
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/test.db")
-    monkeypatch.setenv("DEV_INPROCESS_WORKER", "0")  # tests drive the worker manually
-    # Hermetic: blank all provider vars so the developer's real .env (loaded by
-    # get_settings) can't leak in and flip the provider away from the stub default.
+    monkeypatch.setenv("DEV_INPROCESS_WORKER", "0")
     for var in (
         "GEMINI_API_KEY",
         "LLM_PROVIDER",
         "LLM_API_KEY",
         "LLM_BASE_URL",
         "LLM_COMPARTMENT_ID",
+        "GOOGLE_OAUTH_CLIENT_ID",
+        "GOOGLE_OAUTH_CLIENT_SECRET",
     ):
         monkeypatch.setenv(var, "")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
     config_mod.get_settings.cache_clear()
 
     import playstore_review_service.webapp as webapp_mod
-
-    def fake_get_app(app_id, **kw):
-        if app_id == "com.missing.app":
-            raise AppNotFound(app_id)
-        return AppInfo(
-            app_id=app_id,
-            title="Example Calc",
-            score=4.3,
-            ratings=1000,
-            histogram=[10, 20, 30, 40, 100],
-            installs="1,000,000+",
-            icon="https://example.com/icon.png",
-        )
-
-    def fake_fetch_reviews(app_id, *, country="us", lang="en", max_reviews=500, on_page=None, **kw):
-        reviews = _fake_reviews(30)
-        if on_page:
-            on_page(len(reviews))
-        return FetchResult(
-            app_id=app_id,
-            country=country,
-            lang=lang,
-            sort="NEWEST",
-            requested=max_reviews,
-            reviews=reviews,
-            complete=True,
-        )
-
-    def fake_search(query, **kw):
-        return [
-            AppInfo(
-                app_id=APP_ID,
-                title="Example Calc",
-                score=4.3,
-                installs="1M+",
-                icon="https://example.com/icon.png",
-            )
-        ]
-
     import playstore_review_service.worker as worker_mod
 
     for mod in (webapp_mod, worker_mod):
-        monkeypatch.setattr(mod.scraper_client, "get_app", fake_get_app, raising=True)
-        monkeypatch.setattr(mod.scraper_client, "fetch_reviews", fake_fetch_reviews, raising=True)
-        monkeypatch.setattr(mod.scraper_client, "search_apps", fake_search, raising=True)
+        monkeypatch.setattr(mod.scraper_client, "get_app", _fake_get_app, raising=True)
+        monkeypatch.setattr(mod.scraper_client, "fetch_reviews", _fake_fetch_reviews, raising=True)
+        monkeypatch.setattr(mod.scraper_client, "search_apps", _fake_search, raising=True)
+
+    from playstore_review_service.db import make_engine, make_session_factory
 
     app = webapp_mod.create_app()
     with TestClient(app) as client:
-        from playstore_review_service.db import make_engine, make_session_factory
-
         engine = make_engine(config_mod.get_settings().database_url)
         yield client, make_session_factory(engine)
     config_mod.get_settings.cache_clear()
+
+
+@pytest.fixture()
+def service(tmp_path, monkeypatch):
+    with build_service(tmp_path, monkeypatch) as svc:
+        yield svc
 
 
 def test_health(service):
@@ -299,3 +315,55 @@ def test_index_served(service):
     client, _sf = service
     res = client.get("/")
     assert res.status_code == 200 and "Play Store Review Analysis" in res.text
+
+
+# --------------------------------------------------------------- auth + quota
+
+
+def test_me_reports_quota_and_usage(service):
+    client, sf = service
+    me = client.get("/api/me").json()
+    assert me["authenticated"] is False  # local dev mode
+    assert me["used"] == 0 and me["remaining"] == me["quota"]
+    # a cache-miss analysis consumes one
+    client.post("/api/analyze", json={"app_id": APP_ID, "question": "uses one?"})
+    me2 = client.get("/api/me").json()
+    assert me2["used"] == 1 and me2["remaining"] == me2["quota"] - 1
+
+
+def test_cached_reask_does_not_consume_quota(service):
+    client, sf = service
+    client.post("/api/analyze", json={"app_id": APP_ID, "question": "free reask?"})
+    process_one(sf)
+    used_before = client.get("/api/me").json()["used"]
+    again = client.post("/api/analyze", json={"app_id": APP_ID, "question": "  FREE reask "}).json()
+    assert again["cache_hit"] is True
+    assert client.get("/api/me").json()["used"] == used_before  # no extra consumption
+
+
+def test_per_user_quota_returns_429(tmp_path, monkeypatch):
+    with build_service(tmp_path, monkeypatch, PER_USER_DAILY_ANALYSES="2") as (client, _sf):
+        ok1 = client.post("/api/analyze", json={"app_id": APP_ID, "question": "first one"})
+        ok2 = client.post("/api/analyze", json={"app_id": APP_ID, "question": "second one"})
+        blocked = client.post("/api/analyze", json={"app_id": APP_ID, "question": "third one"})
+        assert ok1.status_code == 200 and ok2.status_code == 200
+        assert blocked.status_code == 429
+        assert "daily limit" in blocked.json()["detail"]
+
+
+def test_auth_required_when_oauth_configured(tmp_path, monkeypatch):
+    with build_service(
+        tmp_path,
+        monkeypatch,
+        GOOGLE_OAUTH_CLIENT_ID="fake-client-id",
+        GOOGLE_OAUTH_CLIENT_SECRET="fake-client-secret",
+    ) as (client, _sf):
+        assert client.get("/api/health").json()["auth"] is True
+        # no session → protected endpoints 401, public ones still work
+        assert (
+            client.post("/api/analyze", json={"app_id": APP_ID, "question": "blocked?"}).status_code
+            == 401
+        )
+        assert client.get("/api/search", params={"q": "x"}).status_code == 401
+        assert client.get("/").status_code == 200  # landing is public
+        assert client.get("/api/health").status_code == 200

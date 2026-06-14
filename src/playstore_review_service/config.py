@@ -40,11 +40,20 @@ class Settings:
     llm_compartment_id: str
     llm_model: str  # the model used for analysis (cheap tier)
     llm_planner_model: str  # heavy tier, reserved for future deep-analysis use
+    # Auth (Google OAuth). When client id/secret are unset, auth is DISABLED and a single
+    # local dev user is used — so localhost works with zero setup; prod sets the creds.
+    google_oauth_client_id: str
+    google_oauth_client_secret: str
+    session_secret: str
+    per_user_daily_analyses: int
     max_reviews_per_analysis: int
     scrape_cache_ttl_hours: int
     global_daily_spend_cap_usd: float
     scrape_delay_seconds: float
     dev_inprocess_worker: bool
+
+    def auth_enabled(self) -> bool:
+        return bool(self.google_oauth_client_id and self.google_oauth_client_secret)
 
     def provider(self) -> str:
         """Resolve the active LLM provider. Order: explicit OpenAI-compatible (OCI) →
@@ -69,6 +78,10 @@ def get_settings() -> Settings:
         llm_compartment_id=os.environ.get("LLM_COMPARTMENT_ID", ""),
         llm_model=os.environ.get("LLM_CHEAP_MODEL", "xai.grok-3-mini"),
         llm_planner_model=os.environ.get("LLM_PLANNER_MODEL", "xai.grok-4"),
+        google_oauth_client_id=os.environ.get("GOOGLE_OAUTH_CLIENT_ID", ""),
+        google_oauth_client_secret=os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", ""),
+        session_secret=os.environ.get("SESSION_SECRET", "dev-insecure-session-secret"),
+        per_user_daily_analyses=int(os.environ.get("PER_USER_DAILY_ANALYSES", "15")),
         max_reviews_per_analysis=int(os.environ.get("MAX_REVIEWS_PER_ANALYSIS", "500")),
         scrape_cache_ttl_hours=int(os.environ.get("SCRAPE_CACHE_TTL_HOURS", "24")),
         global_daily_spend_cap_usd=float(os.environ.get("GLOBAL_DAILY_SPEND_CAP_USD", "5")),

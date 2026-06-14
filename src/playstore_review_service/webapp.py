@@ -11,15 +11,26 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from starlette.middleware.sessions import SessionMiddleware
 
 from . import analysis as an
+from . import auth as auth_mod
 from . import worker as worker_mod
 from .config import get_settings
-from .db import Analysis, Job, Snapshot, init_db, make_engine, make_session_factory, new_job_id
+from .db import (
+    Analysis,
+    Job,
+    Snapshot,
+    User,
+    init_db,
+    make_engine,
+    make_session_factory,
+    new_job_id,
+)
 from .scraper import client as scraper_client
 from .scraper.errors import InvalidAppId, RateLimitedUpstream, ScraperError
 
@@ -55,6 +66,14 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Play Store Review Analysis", lifespan=lifespan, docs_url=None, redoc_url=None
     )
+    app.add_middleware(
+        SessionMiddleware, secret_key=settings.session_secret, same_site="lax", https_only=False
+    )
+    oauth = auth_mod.make_oauth(settings)
+    auth_mod.setup_auth_routes(app, oauth, session_factory)
+
+    def current_user(request: Request) -> User:
+        return auth_mod.resolve_user(request, session_factory, settings)
 
     @app.exception_handler(Exception)
     async def unhandled(_request, exc):  # spec §4.5: never serialize exceptions out
@@ -69,10 +88,26 @@ def create_app() -> FastAPI:
             "gemini": f"gemini ({settings.gemini_model})",
             "stub": "stub (no LLM configured)",
         }[provider]
-        return {"ok": True, "provider": provider, "llm": detail}
+        return {"ok": True, "provider": provider, "llm": detail, "auth": settings.auth_enabled()}
+
+    @app.get("/api/me")
+    def me(user: User = Depends(current_user)) -> dict:
+        with session_factory() as session:
+            used = auth_mod.analyses_used_today(session, user.id)
+        quota = settings.per_user_daily_analyses
+        return {
+            "authenticated": settings.auth_enabled(),
+            "email": user.email,
+            "name": user.name,
+            "used": used,
+            "quota": quota,
+            "remaining": max(0, quota - used),
+        }
 
     @app.get("/api/search")
-    def search(q: str, country: str = "us", lang: str = "en") -> list[dict]:
+    def search(
+        q: str, country: str = "us", lang: str = "en", user: User = Depends(current_user)
+    ) -> list[dict]:
         if not (1 <= len(q.strip()) <= 200) or len(country) != 2 or len(lang) != 2:
             raise HTTPException(422, "invalid query")
         try:
@@ -96,7 +131,7 @@ def create_app() -> FastAPI:
         ]
 
     @app.post("/api/analyze")
-    def analyze(req: AnalyzeRequest) -> dict:
+    def analyze(req: AnalyzeRequest, user: User = Depends(current_user)) -> dict:
         try:
             scraper_client.validate_app_id(req.app_id)
         except InvalidAppId as exc:
@@ -139,8 +174,17 @@ def create_app() -> FastAPI:
             )
             if active is not None:
                 return {"job_id": active.id, "status": active.status, "cache_hit": False}
+            # Quota is consumed only on a real cache MISS (new job). Cached re-asks are free.
+            used = auth_mod.analyses_used_today(session, user.id)
+            if used >= settings.per_user_daily_analyses:
+                raise HTTPException(
+                    429,
+                    f"daily limit reached ({settings.per_user_daily_analyses} analyses) — "
+                    "resets at UTC midnight; cached re-asks remain free",
+                )
             job = Job(
                 id=new_job_id(),
+                user_id=user.id,
                 app_id=req.app_id,
                 country=req.country,
                 lang=req.lang,
@@ -152,7 +196,7 @@ def create_app() -> FastAPI:
             return {"job_id": job.id, "status": "queued", "cache_hit": False}
 
     @app.get("/api/jobs/{job_id}")
-    def job_status(job_id: str) -> dict:
+    def job_status(job_id: str, user: User = Depends(current_user)) -> dict:
         if not job_id.isalnum() or len(job_id) > 32:
             raise HTTPException(422, "invalid job id")
         with session_factory() as session:

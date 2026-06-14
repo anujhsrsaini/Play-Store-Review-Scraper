@@ -19,6 +19,8 @@ dependencies = [
   "sqlalchemy>=2.0",
   "google-genai>=1.0",  # legacy Gemini provider path
   "requests>=2.32",  # OpenAI-compatible (OCI GenAI) provider path
+  "authlib>=1.3",  # Google OAuth
+  "itsdangerous>=2.0",  # signed session cookies (Starlette SessionMiddleware)
 ]
 
 [project.optional-dependencies]
@@ -48,6 +50,10 @@ extend-exclude = ["fetch_reviews.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's `param: T = Depends(...)` is the idiomatic DI pattern, not a mutable default.
+extend-immutable-calls = ["fastapi.Depends"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
