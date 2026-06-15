@@ -15,7 +15,9 @@ The stack runs as four containers via Docker Compose: **Caddy** (public HTTPS) �
 3. **OCI cost guard** (the backstop your code can't bypass): set a **budget + alert**
    in the OCI console for the Generative AI service, and keep `GLOBAL_DAILY_SPEND_CAP_USD`
    in `.env` as the in-app kill-switch.
-4. Generate a strong `SESSION_SECRET` and `POSTGRES_PASSWORD`.
+4. Generate a strong `SESSION_SECRET` and `POSTGRES_PASSWORD`. **Required when auth is on** —
+   the app refuses to start with the default secret. Generate one with:
+   `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`
 
 ## `.env` for the box
 
@@ -50,6 +52,13 @@ Tables are created on first start (idempotent). Updates: `git pull && docker com
 
 ## Notes
 
+- **Dependencies are pinned** in `requirements.txt` (the prod image installs from it, not the
+  pyproject ranges). Regenerate after changing deps: `pip-compile --extra postgres pyproject.toml`.
+- **Job bound**: a single analysis is bounded by `MAX_REVIEWS_PER_ANALYSIS` (scrape) + the LLM
+  HTTP read timeout (OCI: 120s) — a few minutes worst case. There is no hard kill (Python can't
+  safely terminate a thread); a future move to a Celery-style worker with `soft_time_limit` adds one.
+- **Rate limiting** is in-process (per web container). Put Cloudflare in front for real DDoS
+  protection — it also hides the origin IP and adds a WAF.
 - **Schema migrations**: v1 auto-creates tables on startup (fine for a fresh DB). Introduce
   Alembic before making breaking schema changes to a populated DB.
 - **Backups**: `docker compose exec db pg_dump -U $POSTGRES_USER playstore_reviews > backup.sql`.

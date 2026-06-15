@@ -20,11 +20,16 @@ ENV PYTHONUNBUFFERED=1 \
     DEV_INPROCESS_WORKER=0
 WORKDIR /app
 
+# Install pinned dependencies from the lockfile first (reproducible + cacheable layer).
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
 COPY pyproject.toml Readme.md ./
 COPY src ./src
 # Bring in the built SPA (from stage 1) before install so it ships inside the package.
 COPY --from=web /build/src/playstore_review_service/static/spa ./src/playstore_review_service/static/spa
-RUN pip install --no-cache-dir ".[postgres]"
+# Install just our package (deps already pinned above); --no-deps keeps the lock authoritative.
+RUN pip install --no-cache-dir --no-deps .
 
 # Drop privileges — run as a non-root user (limits blast radius of any RCE/traversal).
 RUN useradd --system --create-home --uid 10001 appuser
