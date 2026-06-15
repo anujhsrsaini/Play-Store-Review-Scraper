@@ -127,6 +127,13 @@ def format_review_lines(curated: list[Mapping[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+MIN_QUOTE_CHARS = 8  # reject empty/trivial quotes ("" is a substring of everything)
+MAX_SUMMARY_CHARS = 2000
+MAX_LABEL_CHARS = 200
+MAX_CAVEAT_CHARS = 300
+MAX_QUOTE_CHARS = 600
+
+
 def verify_quotes(payload: dict[str, Any], text_by_id: Mapping[str, str]) -> dict[str, Any]:
     """Drop fabricated quotes/ids; record how many were dropped (spec §4.3)."""
     verified: list[dict[str, Any]] = []
@@ -134,7 +141,9 @@ def verify_quotes(payload: dict[str, Any], text_by_id: Mapping[str, str]) -> dic
     for quote in payload.get("supporting_quotes") or []:
         rid = str(quote.get("id") or "")
         source = text_by_id.get(rid)
-        if source and normalize_text(str(quote.get("quote") or "")) in normalize_text(source):
+        norm = normalize_text(str(quote.get("quote") or ""))
+        # Require a real, non-trivial substring match (empty/1-char quotes can't "verify").
+        if source and len(norm) >= MIN_QUOTE_CHARS and norm in normalize_text(source):
             verified.append(quote)
         else:
             dropped += 1
@@ -150,6 +159,25 @@ def verify_quotes(payload: dict[str, Any], text_by_id: Mapping[str, str]) -> dic
             f"{dropped} unverifiable quote(s) removed.",
         ]
     return out
+
+
+def _clip(value: Any, limit: int) -> Any:
+    return value[:limit] if isinstance(value, str) else value
+
+
+def clamp_answer(payload: dict[str, Any]) -> dict[str, Any]:
+    """Bound free LLM text lengths before storage/render — limits content-injection blast
+    radius on the public share page (the question can steer these fields). XSS itself is
+    blocked by React escaping; this caps abusive/long injected text."""
+    payload["summary"] = _clip(payload.get("summary", ""), MAX_SUMMARY_CHARS)
+    payload["caveats"] = [_clip(c, MAX_CAVEAT_CHARS) for c in (payload.get("caveats") or [])]
+    for theme in payload.get("themes") or []:
+        if isinstance(theme, dict):
+            theme["label"] = _clip(theme.get("label", ""), MAX_LABEL_CHARS)
+    for q in payload.get("supporting_quotes") or []:
+        if isinstance(q, dict):
+            q["quote"] = _clip(q.get("quote", ""), MAX_QUOTE_CHARS)
+    return payload
 
 
 def _top_ngrams(texts: list[str], n_terms: int = 8) -> list[str]:

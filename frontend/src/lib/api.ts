@@ -44,7 +44,7 @@ export interface Answer {
 }
 
 export interface AnalysisResult {
-  analysis_id: number;
+  share_token: string;
   model: string;
   app: {
     app_id: string;

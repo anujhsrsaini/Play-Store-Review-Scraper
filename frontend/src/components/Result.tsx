@@ -13,7 +13,7 @@ export function Result({
   result: AnalysisResult;
   onAskAnother?: () => void;
 }) {
-  const { app, snapshot, answer, model, analysis_id } = result;
+  const { app, snapshot, answer, model, share_token } = result;
   const positives = answer.themes.filter((t) => t.polarity === "positive");
   const negatives = answer.themes.filter((t) => t.polarity !== "positive");
 
@@ -35,7 +35,7 @@ export function Result({
           </div>
         </div>
         <div className="ml-auto flex shrink-0 gap-2">
-          <ShareButton analysisId={analysis_id} />
+          <ShareButton token={share_token} />
           {onAskAnother && (
             <Button variant="ghost" size="sm" onClick={onAskAnother}>
               <MessageSquarePlus className="h-4 w-4" /> Ask another
@@ -152,10 +152,10 @@ function CaveatsBanner({ caveats, dataQuality }: { caveats: string[]; dataQualit
   );
 }
 
-function ShareButton({ analysisId }: { analysisId: number }) {
+function ShareButton({ token }: { token: string }) {
   const [copied, setCopied] = useState(false);
   const onShare = async () => {
-    const url = `${window.location.origin}/a/${analysisId}`;
+    const url = `${window.location.origin}/a/${token}`;
     try {
       await navigator.clipboard.writeText(url);
     } catch {

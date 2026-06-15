@@ -26,6 +26,10 @@ COPY src ./src
 COPY --from=web /build/src/playstore_review_service/static/spa ./src/playstore_review_service/static/spa
 RUN pip install --no-cache-dir ".[postgres]"
 
+# Drop privileges — run as a non-root user (limits blast radius of any RCE/traversal).
+RUN useradd --system --create-home --uid 10001 appuser
+USER appuser
+
 EXPOSE 8000
 # Default command runs the web server; the worker service overrides it (see compose).
 CMD ["pmr-serve"]

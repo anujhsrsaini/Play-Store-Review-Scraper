@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+DEFAULT_SESSION_SECRET = "dev-insecure-session-secret"  # local-only; prod MUST override
+
 
 def _load_dotenv(path: Path) -> None:
     """Minimal .env loader (KEY=VALUE lines). Never overrides real env vars."""
@@ -83,7 +85,7 @@ def get_settings() -> Settings:
         google_client_id=os.environ.get("GOOGLE_CLIENT_ID", ""),
         google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET", ""),
         google_redirect_uri=os.environ.get("GOOGLE_REDIRECT_URI", ""),
-        session_secret=os.environ.get("SESSION_SECRET", "dev-insecure-session-secret"),
+        session_secret=os.environ.get("SESSION_SECRET", DEFAULT_SESSION_SECRET),
         session_cookie_secure=os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
         per_user_daily_analyses=int(os.environ.get("PER_USER_DAILY_ANALYSES", "15")),
         max_reviews_per_analysis=int(os.environ.get("MAX_REVIEWS_PER_ANALYSIS", "500")),

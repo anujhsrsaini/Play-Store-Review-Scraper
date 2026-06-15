@@ -35,6 +35,11 @@ def new_job_id() -> str:
     return uuid.uuid4().hex
 
 
+def new_token() -> str:
+    """Unguessable id for shareable permalinks (prevents IDOR enumeration)."""
+    return uuid.uuid4().hex
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -110,6 +115,8 @@ class Analysis(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Public, unguessable handle used by the share permalink (NOT the sequential PK).
+    share_token: Mapped[str] = mapped_column(String(32), unique=True, index=True, default=new_token)
     app_id: Mapped[str] = mapped_column(String(200), index=True)
     country: Mapped[str] = mapped_column(String(8))
     lang: Mapped[str] = mapped_column(String(8))
@@ -120,6 +127,16 @@ class Analysis(Base):
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class DailySpend(Base):
+    """Single row per UTC day holding the running estimated LLM spend. Updated under a
+    row lock so the global daily cap is enforced atomically even with multiple workers."""
+
+    __tablename__ = "daily_spend"
+
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)  # YYYY-MM-DD (UTC)
+    spent_usd: Mapped[float] = mapped_column(Float, default=0.0)
 
 
 class UsageLog(Base):

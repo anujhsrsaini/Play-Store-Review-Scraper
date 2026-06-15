@@ -29,6 +29,7 @@ from .config import Settings, get_settings
 from .db import (
     Analysis,
     CachedReview,
+    DailySpend,
     Job,
     Snapshot,
     UsageLog,
@@ -54,6 +55,38 @@ def today_spend_usd(session: Session) -> float:
         )
     ).scalar_one()
     return float(total)
+
+
+def _utc_day() -> str:
+    return utcnow().date().isoformat()
+
+
+def reserve_spend(session: Session, estimated: float, cap: float) -> bool:
+    """Atomically reserve `estimated` against the daily cap under a row lock, so concurrent
+    workers can't all pass the check before any writes (spec §4.4). Returns False if the cap
+    would be exceeded. SQLite serializes writers; Postgres uses SELECT ... FOR UPDATE."""
+    day = _utc_day()
+    row = session.get(DailySpend, day, with_for_update=True)
+    if row is None:
+        row = DailySpend(day=day, spent_usd=0.0)
+        session.add(row)
+        session.flush()
+    if row.spent_usd + estimated > cap:
+        session.commit()
+        return False
+    row.spent_usd += estimated
+    session.commit()
+    return True
+
+
+def reconcile_spend(session: Session, delta: float) -> None:
+    """Adjust today's reserved spend by `delta` (actual − estimate, or release on failure)."""
+    if not delta:
+        return
+    row = session.get(DailySpend, _utc_day(), with_for_update=True)
+    if row is not None:
+        row.spent_usd = max(0.0, row.spent_usd + delta)
+        session.commit()
 
 
 def claim_next_job(session: Session) -> Job | None:
@@ -179,25 +212,33 @@ def _analyze(session: Session, job: Job, snap: Snapshot, settings: Settings) -> 
         model, cost, event = "stub", 0.0, "stub"
     else:
         model = settings.llm_model if provider == "openai_compatible" else settings.gemini_model
-        # Spend kill-switch: estimate cost BEFORE spending; block at the daily cap (spec §4.4).
-        estimated = llm.cost_usd(model, llm.estimate_tokens(lines), llm.MAX_OUTPUT_TOKENS)
-        if today_spend_usd(session) + estimated > settings.global_daily_spend_cap_usd:
+        # Estimate with the provider's real output ceiling (Grok reasoning uses the bigger
+        # OCI budget), then ATOMICALLY reserve against the daily cap before spending (§4.4).
+        max_out = (
+            llm_openai.OCI_MAX_TOKENS if provider == "openai_compatible" else llm.MAX_OUTPUT_TOKENS
+        )
+        estimated = llm.cost_usd(model, llm.estimate_tokens(lines), max_out)
+        if not reserve_spend(session, estimated, settings.global_daily_spend_cap_usd):
             raise SpendCapExceeded(
                 f"daily LLM spend cap (${settings.global_daily_spend_cap_usd}) reached"
             )
-        if provider == "openai_compatible":
-            payload, usage = llm_openai.openai_compatible_analyze(
-                job.question,
-                lines,
-                base_url=settings.llm_base_url,
-                api_key=settings.llm_api_key,
-                compartment_id=settings.llm_compartment_id,
-                model=model,
-            )
-        else:  # gemini
-            payload, usage = llm.gemini_analyze(
-                job.question, lines, api_key=settings.gemini_api_key, model=model
-            )
+        try:
+            if provider == "openai_compatible":
+                payload, usage = llm_openai.openai_compatible_analyze(
+                    job.question,
+                    lines,
+                    base_url=settings.llm_base_url,
+                    api_key=settings.llm_api_key,
+                    compartment_id=settings.llm_compartment_id,
+                    model=model,
+                )
+            else:  # gemini
+                payload, usage = llm.gemini_analyze(
+                    job.question, lines, api_key=settings.gemini_api_key, model=model
+                )
+        except Exception:
+            reconcile_spend(session, -estimated)  # release the reservation on failure
+            raise
         payload = an.verify_quotes(
             payload, {str(r["review_id"]): str(r["text"] or "") for r in reviews}
         )
@@ -208,7 +249,10 @@ def _analyze(session: Session, job: Job, snap: Snapshot, settings: Settings) -> 
             if real_cost is not None
             else llm.cost_usd(model, usage["tokens_in"], usage["tokens_out"])
         )
+        reconcile_spend(session, cost - estimated)  # true-up reserved → actual
         event = provider
+
+    payload = an.clamp_answer(payload)
 
     payload["sentiment_breakdown"] = sentiment
     payload["data_quality"] = (
@@ -262,10 +306,14 @@ def process_one(session_factory, settings: Settings | None = None) -> bool:
             job.status = "error"
             job.error = type(exc).__name__  # classified type only — no raw messages out
             logger.warning("job %s scraper failure: %s", job.id, type(exc).__name__)
-        except (SpendCapExceeded, llm.LLMError) as exc:
+        except SpendCapExceeded as exc:
             job.status = "error"
-            job.error = str(exc)[:200]
+            job.error = "spend_cap_reached"  # classified code; full detail stays in logs
             logger.warning("job %s: %s", job.id, exc)
+        except llm.LLMError as exc:
+            job.status = "error"
+            job.error = "llm_error"
+            logger.warning("job %s LLM failure: %s", job.id, type(exc).__name__)
         except Exception:
             job.status = "error"
             job.error = "internal_error"

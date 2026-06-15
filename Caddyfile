@@ -2,5 +2,10 @@
 # DOMAIN is injected from .env via docker-compose.
 {$DOMAIN} {
 	encode zstd gzip
+	header {
+		# HSTS (only meaningful over the HTTPS Caddy terminates). App sets CSP/X-Frame/etc.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
 	reverse_proxy web:8000
 }
