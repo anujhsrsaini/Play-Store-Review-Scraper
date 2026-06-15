@@ -13,7 +13,6 @@ from playstore_review_service.analysis import clamp_answer, verify_quotes
 from playstore_review_service.llm import build_prompt
 from playstore_review_service.scraper import client as scraper_client
 from playstore_review_service.scraper.models import AppInfo
-
 from test_service import APP_ID, build_service
 
 
@@ -21,6 +20,7 @@ from test_service import APP_ID, build_service
 def service(tmp_path, monkeypatch):
     with build_service(tmp_path, monkeypatch) as svc:
         yield svc
+
 
 # --------------------------------------------------------- C2: session-secret boot guard
 
