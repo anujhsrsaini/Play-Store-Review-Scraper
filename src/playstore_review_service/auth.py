@@ -104,8 +104,11 @@ def setup_auth_routes(app, oauth, session_factory: sessionmaker, settings: Setti
         sub = info.get("sub")
         if not sub:
             raise HTTPException(400, "oauth_no_subject")
+        if info.get("email_verified") is False:
+            raise HTTPException(400, "email_not_verified")
         with session_factory() as session:
             upsert_user(session, sub, info.get("email", ""), info.get("name", ""))
+        request.session.clear()  # fresh session on login (avoid fixation)
         request.session["user_id"] = sub
         return RedirectResponse("/")
 
