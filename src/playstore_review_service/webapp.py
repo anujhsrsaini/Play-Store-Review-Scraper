@@ -8,6 +8,9 @@ messages (spec §4.5): no stack traces, no upstream payloads, no key material.
 from __future__ import annotations
 
 import logging
+import re
+import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -21,7 +24,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import analysis as an
 from . import auth as auth_mod
 from . import worker as worker_mod
-from .config import get_settings
+from .config import DEFAULT_SESSION_SECRET, get_settings
 from .db import (
     Analysis,
     Job,
@@ -40,6 +43,14 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 SPA_DIR = STATIC_DIR / "spa"  # built React app (gitignored; produced by `npm run build`)
 ACTIVE_STATUSES = ("queued", "scraping", "analyzing")
+LOCALE_RE = re.compile(r"^[a-z]{2}$")
+RATE_WINDOW_SECONDS = 60.0
+RATE_MAX_PER_WINDOW = 40  # per identity, per endpoint group (in-process; Cloudflare for DDoS)
+CSP = (
+    "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; "
+    "script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; "
+    "frame-ancestors 'none'"
+)
 
 
 class AnalyzeRequest(BaseModel):
@@ -51,8 +62,25 @@ class AnalyzeRequest(BaseModel):
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # Fail safe: never run a real auth deployment with the public default signing key,
+    # which would let anyone forge a session cookie for any user.
+    if settings.auth_enabled() and settings.session_secret == DEFAULT_SESSION_SECRET:
+        raise RuntimeError(
+            "SESSION_SECRET must be set to a strong random value when auth is enabled "
+            "(refusing to start with the insecure default)."
+        )
     engine = make_engine(settings.database_url)
     session_factory = make_session_factory(engine)
+    rate_hits: dict[str, deque[float]] = defaultdict(deque)
+
+    def rate_limit(key: str) -> None:
+        now = time.monotonic()
+        dq = rate_hits[key]
+        while dq and dq[0] < now - RATE_WINDOW_SECONDS:
+            dq.popleft()
+        if len(dq) >= RATE_MAX_PER_WINDOW:
+            raise HTTPException(429, "rate_limited")
+        dq.append(now)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -85,6 +113,15 @@ def create_app() -> FastAPI:
         logger.exception("unhandled error: %s", type(exc).__name__)
         return JSONResponse(status_code=500, content={"error": "internal_error"})
 
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        resp = await call_next(request)
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        resp.headers.setdefault("Content-Security-Policy", CSP)
+        return resp
+
     @app.get("/api/health")
     def health() -> dict:
         provider = settings.provider()
@@ -113,7 +150,12 @@ def create_app() -> FastAPI:
     def search(
         q: str, country: str = "us", lang: str = "en", user: User = Depends(current_user)
     ) -> list[dict]:
-        if not (1 <= len(q.strip()) <= 200) or len(country) != 2 or len(lang) != 2:
+        rate_limit(f"search:{user.id}")
+        if (
+            not (1 <= len(q.strip()) <= 200)
+            or not LOCALE_RE.match(country)
+            or not LOCALE_RE.match(lang)
+        ):
             raise HTTPException(422, "invalid query")
         try:
             apps = scraper_client.search_apps(q.strip(), country=country, lang=lang, n_hits=8)
@@ -137,12 +179,16 @@ def create_app() -> FastAPI:
 
     @app.post("/api/analyze")
     def analyze(req: AnalyzeRequest, user: User = Depends(current_user)) -> dict:
+        rate_limit(f"analyze:{user.id}")
         try:
             scraper_client.validate_app_id(req.app_id)
         except InvalidAppId as exc:
             raise HTTPException(422, "invalid app_id") from exc
         qhash = an.question_hash(req.question)
         with session_factory() as session:
+            # Serialize this user's concurrent submits (row lock) so the quota count below
+            # can't be raced past by parallel requests.
+            session.get(User, user.id, with_for_update=True)
             # Answer cache: fresh snapshot + same normalized question → no job, no LLM.
             hit = session.execute(
                 select(Analysis, Snapshot)
@@ -208,6 +254,8 @@ def create_app() -> FastAPI:
             job = session.get(Job, job_id)
             if job is None:
                 raise HTTPException(404, "job not found")
+            if job.user_id is not None and job.user_id != user.id:
+                raise HTTPException(404, "job not found")  # 404 (not 403) — don't confirm existence
             out: dict = {
                 "job_id": job.id,
                 "status": job.status,
@@ -220,11 +268,19 @@ def create_app() -> FastAPI:
                 out["result"] = _result_payload(record, snap)
             return out
 
-    @app.get("/api/analysis/{analysis_id}")
-    def get_analysis(analysis_id: int) -> dict:
-        """Shareable permalink: fetch a previously-computed analysis by id."""
+    @app.get("/api/analysis/{token}")
+    def get_analysis(token: str) -> dict:
+        """Shareable permalink: fetch an analysis by its unguessable share_token.
+        Public by design (so shared links open for logged-out viewers), but the token is a
+        32-char random hex — not a sequential id — so the set can't be enumerated."""
+        if not token.isalnum() or len(token) != 32:
+            raise HTTPException(404, "analysis not found")
         with session_factory() as session:
-            record = session.get(Analysis, analysis_id)
+            record = (
+                session.execute(select(Analysis).where(Analysis.share_token == token))
+                .scalars()
+                .first()
+            )
             if record is None:
                 raise HTTPException(404, "analysis not found")
             snap = session.get(Snapshot, record.snapshot_id)
@@ -238,13 +294,18 @@ def create_app() -> FastAPI:
         if (SPA_DIR / "assets").is_dir():
             app.mount("/assets", StaticFiles(directory=SPA_DIR / "assets"), name="assets")
 
+        spa_root = SPA_DIR.resolve()
+
         @app.get("/{full_path:path}")
         def spa(full_path: str) -> FileResponse:
             if full_path.startswith(("api/", "auth/")):
                 raise HTTPException(404, "not found")
-            candidate = SPA_DIR / full_path
-            if full_path and candidate.is_file():
-                return FileResponse(candidate)
+            if full_path:
+                candidate = (SPA_DIR / full_path).resolve()
+                # Containment check: never serve a file outside the built SPA dir, even if
+                # full_path contains ../ traversal (else arbitrary file disclosure).
+                if candidate.is_relative_to(spa_root) and candidate.is_file():
+                    return FileResponse(candidate)
             return FileResponse(spa_index)
     else:
 
@@ -276,11 +337,9 @@ def _result_payload(record: Analysis, snap: Snapshot) -> dict:
             "complete": snap.complete,
         },
         "model": record.model,
+        "share_token": record.share_token,
         "answer": record.answer,
     }
-
-
-app = create_app()
 
 
 def main() -> None:  # pragma: no cover - `pmr-serve` entrypoint
@@ -289,10 +348,13 @@ def main() -> None:  # pragma: no cover - `pmr-serve` entrypoint
     import uvicorn
 
     logging.basicConfig(level=logging.INFO)
+    # Factory mode: the app is built per-process at startup (no module-level instance), so
+    # importing this module has no side effects and can't crash on a config guard.
     uvicorn.run(
-        "playstore_review_service.webapp:app",
+        "playstore_review_service.webapp:create_app",
+        factory=True,
         host=os.environ.get("HOST", "127.0.0.1"),  # set 0.0.0.0 in Docker
         port=int(os.environ.get("PORT", "8000")),
-        proxy_headers=True,  # trust X-Forwarded-* from Caddy
-        forwarded_allow_ips="*",
+        proxy_headers=True,  # trust X-Forwarded-* only from the configured proxy
+        forwarded_allow_ips=os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1"),
     )

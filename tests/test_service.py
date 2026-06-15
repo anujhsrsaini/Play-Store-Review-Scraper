@@ -143,14 +143,17 @@ def test_share_permalink_returns_cached_analysis(service):
     body = client.post("/api/analyze", json={"app_id": APP_ID, "question": "shareable?"}).json()
     process_one(sf)
     done = client.get(f"/api/jobs/{body['job_id']}").json()["result"]
-    analysis_id = done["analysis_id"]
+    token = done["share_token"]
+    assert len(token) == 32  # unguessable, not a sequential id (IDOR fix)
     assert done["app"]["icon"] == "https://example.com/icon.png"
     assert done["app"]["histogram"] == [10, 20, 30, 40, 100]
-    # permalink fetch returns the same analysis
-    shared = client.get(f"/api/analysis/{analysis_id}").json()
-    assert shared["analysis_id"] == analysis_id
+    # permalink fetch by token returns the same analysis (public, no auth needed)
+    shared = client.get(f"/api/analysis/{token}").json()
+    assert shared["share_token"] == token
     assert shared["answer"]["summary"] == done["answer"]["summary"]
-    assert client.get("/api/analysis/999999").status_code == 404
+    # enumeration is dead: unknown token + non-token-shaped id both 404
+    assert client.get("/api/analysis/" + "0" * 32).status_code == 404
+    assert client.get("/api/analysis/1").status_code == 404
 
 
 def test_search_rejects_empty_query(service):
@@ -244,7 +247,7 @@ def test_spend_cap_blocks_gemini_calls(service, monkeypatch):
     process_one(sf)
     out = client.get(f"/api/jobs/{body['job_id']}").json()
     assert out["status"] == "error"
-    assert "spend cap" in out["error"]
+    assert out["error"] == "spend_cap_reached"
     config_mod.get_settings.cache_clear()
 
 
@@ -369,6 +372,7 @@ def test_auth_required_when_oauth_configured(tmp_path, monkeypatch):
         monkeypatch,
         GOOGLE_CLIENT_ID="fake-client-id",
         GOOGLE_CLIENT_SECRET="fake-client-secret",
+        SESSION_SECRET="a-real-non-default-secret-for-tests",  # else boot guard fires
     ) as (client, _sf):
         assert client.get("/api/health").json()["auth"] is True
         # no session → protected endpoints 401, public ones still work

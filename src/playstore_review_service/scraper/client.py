@@ -60,6 +60,7 @@ HARD_MAX_REVIEWS = 2000  # server-side ceiling; bounds cost + scrape time (spec 
 DEFAULT_DELAY_SECONDS = 1.0  # polite pacing; pass 0 ONLY in tests
 
 APP_ID_RE = re.compile(r"^[a-zA-Z0-9._]{1,200}$")
+LOCALE_RE = re.compile(r"^[a-z]{2}$")
 MAX_QUERY_LENGTH = 200
 
 # Message fragments that identify a rate-limit response from the library's transport
@@ -96,6 +97,13 @@ def validate_app_id(app_id: str) -> None:
 def _validate_query(query: str) -> None:
     if not isinstance(query, str) or not query.strip() or len(query) > MAX_QUERY_LENGTH:
         raise ValueError(f"invalid search query (1..{MAX_QUERY_LENGTH} chars required)")
+
+
+def _validate_locale(country: str, lang: str) -> None:
+    """Defense-in-depth: every scraper entry point validates locale before it reaches the
+    library's URL construction (not just the web layer)."""
+    if not LOCALE_RE.match(country) or not LOCALE_RE.match(lang):
+        raise ValueError(f"invalid locale: country={country!r} lang={lang!r}")
 
 
 def classify_exception(exc: Exception) -> Exception:
@@ -230,6 +238,13 @@ def _gps():
         import google_play_scraper as gps
     except ImportError as exc:  # pragma: no cover - exercised only when lib absent
         raise ScraperUnavailable("google-play-scraper is not installed") from exc
+    # The library disables TLS verification process-wide at import
+    # (ssl._create_default_https_context = _create_unverified_context). Restore the
+    # verifying default — Google Play has valid certs, so scraping still works, and we
+    # don't leave the whole process MITM-able.
+    import ssl
+
+    ssl._create_default_https_context = ssl.create_default_context
     return gps
 
 
@@ -245,6 +260,7 @@ def search_apps(
     query: str, *, country: str = "us", lang: str = "en", n_hits: int = 10
 ) -> list[AppInfo]:
     _validate_query(query)
+    _validate_locale(country, lang)
     gps = _gps()
     raws = with_retries(lambda: gps.search(query, lang=lang, country=country, n_hits=n_hits))
     return [AppInfo.from_raw(r) for r in raws]
@@ -252,6 +268,7 @@ def search_apps(
 
 def get_app(app_id: str, *, country: str = "us", lang: str = "en") -> AppInfo:
     validate_app_id(app_id)
+    _validate_locale(country, lang)
     gps = _gps()
     not_found = _not_found_error()
 
@@ -283,6 +300,7 @@ def fetch_reviews(
     normalized to plain ``None`` here so :func:`paginate_reviews` terminates correctly.
     """
     validate_app_id(app_id)
+    _validate_locale(country, lang)
     capped = max(0, min(max_reviews, HARD_MAX_REVIEWS))
     gps = _gps()
     sort_val = sort if sort is not None else gps.Sort.NEWEST

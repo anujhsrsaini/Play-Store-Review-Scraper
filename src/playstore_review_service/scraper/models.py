@@ -42,6 +42,14 @@ def _coerce_histogram(value: Any) -> list[int] | None:
     return None
 
 
+def _safe_https_url(value: Any) -> str | None:
+    """Only allow https URLs for fields rendered as <img src> (blocks javascript:/data:
+    URLs from a malicious listing — defense vs stored XSS). Anything else → None."""
+    if isinstance(value, str) and value.startswith("https://"):
+        return value
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class AppInfo:
     """App metadata, preserving the market-research fields the legacy script discarded.
@@ -97,7 +105,7 @@ class AppInfo:
             updated=raw.get("updated"),
             version=raw.get("version"),
             developer=raw.get("developer"),
-            icon=raw.get("icon"),
+            icon=_safe_https_url(raw.get("icon")),
             description=raw.get("description"),
             summary=raw.get("summary"),
             recent_changes=raw.get("recentChanges"),
