@@ -117,12 +117,20 @@ def extract_json(text: str) -> dict[str, Any]:
 
 
 def normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Fill the optional keys so downstream rendering is uniform across providers."""
-    payload.setdefault("themes", [])
-    payload.setdefault("supporting_quotes", [])
-    payload.setdefault("caveats", [])
-    payload.setdefault("not_enough_data", False)
+    """Fill optional keys AND sanitize structure so a malformed-but-parseable response
+    (e.g. themes as strings) can't crash downstream verify/clamp/render (N4)."""
+    payload["summary"] = str(payload.get("summary") or "")
+    payload["not_enough_data"] = bool(payload.get("not_enough_data", False))
+    payload["themes"] = [t for t in _aslist(payload.get("themes")) if isinstance(t, dict)]
+    payload["supporting_quotes"] = [
+        q for q in _aslist(payload.get("supporting_quotes")) if isinstance(q, dict)
+    ]
+    payload["caveats"] = [str(c) for c in _aslist(payload.get("caveats"))]
     return payload
+
+
+def _aslist(value: Any) -> list:
+    return value if isinstance(value, list) else []
 
 
 def schema_instruction() -> str:

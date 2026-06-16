@@ -55,6 +55,10 @@ def star_sentiment(scores: Iterable[int | None]) -> dict[str, Any]:
             neg += 1
         else:
             neu += 1
+    return _sentiment_pcts(pos, neu, neg, source="star_ratings_sample")
+
+
+def _sentiment_pcts(pos: int, neu: int, neg: int, *, source: str) -> dict[str, Any]:
     total = pos + neg + neu
 
     def pct(n: int) -> float:
@@ -65,20 +69,54 @@ def star_sentiment(scores: Iterable[int | None]) -> dict[str, Any]:
         "neutral_pct": pct(neu),
         "negative_pct": pct(neg),
         "counted": total,
-        "source": "star_ratings",
+        "source": source,
     }
+
+
+def sentiment_from_histogram(histogram: Any) -> dict[str, Any] | None:
+    """Headline sentiment from the app's LIFETIME [1★..5★] rating counts (true population),
+    not the recency-biased text sample (N2). Returns None if the histogram is unusable."""
+    if not (isinstance(histogram, list) and len(histogram) == 5):
+        return None
+    try:
+        c = [int(x) for x in histogram]
+    except (TypeError, ValueError):
+        return None
+    if sum(c) <= 0:
+        return None
+    return _sentiment_pcts(c[3] + c[4], c[2], c[0] + c[1], source="lifetime_histogram")
+
+
+def question_keywords(question: str) -> list[str]:
+    """Salient content words from the question, for relevance boosting."""
+    words = [
+        w for w in _WORD_RE.findall((question or "").lower()) if w not in _STOPWORDS and len(w) > 2
+    ]
+    seen: set[str] = set()
+    out: list[str] = []
+    for w in words:  # de-dup, preserve order
+        if w not in seen:
+            seen.add(w)
+            out.append(w)
+    return out
 
 
 def curate_reviews(
     reviews: Sequence[Mapping[str, Any]],
     *,
+    question: str | None = None,
     token_budget: int = DEFAULT_CONTEXT_TOKEN_BUDGET,
     recent_n: int = 150,
     helpful_n: int = 100,
     per_star_n: int = 40,
+    relevant_n: int = 120,
 ) -> list[Mapping[str, Any]]:
-    """Stratified sample (spec §4.3): recent + most-helpful + per-star buckets,
-    de-duplicated, capped by an approximate token budget. Order: recency first."""
+    """Stratified sample (spec §4.3): question-relevant + recent + most-helpful + per-star
+    buckets, de-duplicated, capped by an approximate token budget.
+
+    The question-relevant bucket (N3) is the cheap, no-RAG fix for the previously
+    question-blind sample: reviews whose text mentions the question's keywords are pulled
+    in first, ordered by how many keywords they hit then recency."""
     with_text = [r for r in reviews if (r.get("text") or "").strip()]
     by_recency = sorted(with_text, key=lambda r: r.get("created_at") or "", reverse=True)
     by_thumbs = sorted(with_text, key=lambda r: r.get("thumbs_up") or 0, reverse=True)
@@ -86,6 +124,8 @@ def curate_reviews(
     chosen: dict[str, Mapping[str, Any]] = {}
 
     def take(pool: Iterable[Mapping[str, Any]], n: int) -> None:
+        if n <= 0:
+            return
         added = 0
         for r in pool:
             rid = str(r.get("review_id") or "")
@@ -95,6 +135,20 @@ def curate_reviews(
             added += 1
             if added >= n:
                 break
+
+    kws = question_keywords(question or "")
+    if kws:
+
+        def hits(r: Mapping[str, Any]) -> int:
+            text = (r.get("text") or "").lower()
+            return sum(1 for k in kws if k in text)
+
+        relevant = sorted(
+            (r for r in by_recency if hits(r) > 0),
+            key=lambda r: (hits(r), r.get("created_at") or ""),
+            reverse=True,
+        )
+        take(relevant, relevant_n)  # question-relevant reviews first
 
     take(by_recency, recent_n)
     take(by_thumbs, helpful_n)
@@ -149,15 +203,23 @@ def verify_quotes(payload: dict[str, Any], text_by_id: Mapping[str, str]) -> dic
             dropped += 1
     kept_ids = {str(q.get("id")) for q in verified}
     themes = []
+    orphan_themes = 0
     for theme in payload.get("themes") or []:
         ids = [i for i in (theme.get("supporting_quote_ids") or []) if str(i) in kept_ids]
+        if not ids:
+            orphan_themes += 1  # no surviving evidence → drop, don't render as fact (N5)
+            continue
         themes.append({**theme, "supporting_quote_ids": ids})
     out = {**payload, "supporting_quotes": verified, "themes": themes}
+    # Relevance floor (N5): nothing survived verification → not a grounded answer.
+    if not verified and not themes:
+        out["not_enough_data"] = True
+    caveats = list(payload.get("caveats") or [])
     if dropped:
-        out["caveats"] = [
-            *(payload.get("caveats") or []),
-            f"{dropped} unverifiable quote(s) removed.",
-        ]
+        caveats.append(f"{dropped} unverifiable quote(s) removed.")
+    if orphan_themes:
+        caveats.append(f"{orphan_themes} theme(s) without supporting evidence removed.")
+    out["caveats"] = caveats
     return out
 
 

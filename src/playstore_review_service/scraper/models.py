@@ -123,6 +123,8 @@ class Review:
     app_version: str | None = None
     thumbs_up: int | None = None
     user_name: str | None = None  # None when anonymized
+    reply_content: str | None = None  # developer's reply, if any
+    replied_at: str | None = None  # ISO 8601
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any], *, anonymize: bool = True) -> Review:
@@ -135,4 +137,6 @@ class Review:
             app_version=raw.get("reviewCreatedVersion"),
             thumbs_up=raw.get("thumbsUpCount"),
             user_name=None if anonymize else raw.get("userName"),
+            reply_content=raw.get("replyContent"),
+            replied_at=_coerce_iso_datetime(raw.get("repliedAt")),
         )

@@ -33,7 +33,7 @@ def test_star_sentiment_full_corpus():
     assert out["counted"] == 7  # None ignored
     assert out["positive_pct"] == round(100 * 3 / 7, 1)
     assert out["negative_pct"] == round(100 * 3 / 7, 1)
-    assert out["source"] == "star_ratings"
+    assert out["source"] == "star_ratings_sample"
 
 
 def test_star_sentiment_empty():

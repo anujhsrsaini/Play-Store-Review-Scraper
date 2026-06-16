@@ -82,6 +82,8 @@ class CachedReview(Base):
     created_at: Mapped[str | None] = mapped_column(String(40), nullable=True)  # ISO 8601
     app_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     thumbs_up: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reply_content: Mapped[str | None] = mapped_column(Text, nullable=True)  # developer reply
+    replied_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
 
 class Job(Base):
@@ -137,6 +139,26 @@ class DailySpend(Base):
 
     day: Mapped[str] = mapped_column(String(10), primary_key=True)  # YYYY-MM-DD (UTC)
     spent_usd: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class AnalysisMetric(Base):
+    """Per-analysis quality/observability metrics (separate from $ usage). Drives the
+    quality dashboard: groundedness proxy (verified-quote ratio), abstention rate, latency."""
+
+    __tablename__ = "analysis_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provider: Mapped[str] = mapped_column(String(32), default="")
+    model: Mapped[str] = mapped_column(String(64), default="")
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    reviews_fetched: Mapped[int] = mapped_column(Integer, default=0)
+    reviews_curated: Mapped[int] = mapped_column(Integer, default=0)
+    verified_quotes: Mapped[int] = mapped_column(Integer, default=0)
+    dropped_quotes: Mapped[int] = mapped_column(Integer, default=0)
+    not_enough_data: Mapped[bool] = mapped_column(Boolean, default=False)
+    llm_fallback: Mapped[bool] = mapped_column(Boolean, default=False)  # LLM failed → stub
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
 class UsageLog(Base):

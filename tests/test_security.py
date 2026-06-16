@@ -29,7 +29,9 @@ def test_boot_refuses_default_session_secret_when_auth_enabled(tmp_path, monkeyp
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/g.db")
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "x")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "y")
-    monkeypatch.delenv("SESSION_SECRET", raising=False)  # → insecure default
+    # Pin to the insecure default explicitly (a real local .env may set SESSION_SECRET,
+    # which dotenv would load — set it here so the test is hermetic).
+    monkeypatch.setenv("SESSION_SECRET", config_mod.DEFAULT_SESSION_SECRET)
     config_mod.get_settings.cache_clear()
     import playstore_review_service.webapp as webapp_mod
 

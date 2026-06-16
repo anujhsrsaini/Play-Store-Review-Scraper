@@ -1,4 +1,4 @@
-import { Check, Link2, MessageSquarePlus, Star } from "lucide-react";
+import { Check, Info, Link2, MessageSquarePlus, Star } from "lucide-react";
 import { useState } from "react";
 import type { AnalysisResult, Theme } from "@/lib/api";
 import { Badge, Button, Card } from "./ui";
@@ -43,6 +43,8 @@ export function Result({
           )}
         </div>
       </div>
+
+      <MethodologyStrip result={result} />
 
       <div className="space-y-6 p-4 sm:p-6">
         <section>
@@ -148,6 +150,35 @@ function CaveatsBanner({ caveats, dataQuality }: { caveats: string[]; dataQualit
       {items.map((c, i) => (
         <div key={i}>ⓘ {c}</div>
       ))}
+    </div>
+  );
+}
+
+function MethodologyStrip({ result }: { result: AnalysisResult }) {
+  const { app, snapshot, answer } = result;
+  const lifetime = app.reviews ? ` of ${app.reviews.toLocaleString()}` : "";
+  const sortLabel = snapshot.sort.replace(/^Sort\./, "").toLowerCase();
+  const fetched = new Date(snapshot.fetched_at).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  const sentimentSrc =
+    answer.sentiment_breakdown?.source === "lifetime_histogram"
+      ? "sentiment from lifetime ★ ratings"
+      : "sentiment from the sampled reviews";
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-white/10 bg-white/[0.02] px-4 py-2 text-[11px] text-slate-400 sm:px-5">
+      <Info className="h-3.5 w-3.5 text-slate-500" />
+      <span>
+        Analyzed <strong className="font-medium text-slate-300">{snapshot.review_count}{lifetime}</strong> reviews
+      </span>
+      <span aria-hidden>·</span>
+      <span>{sortLabel}</span>
+      <span aria-hidden>·</span>
+      <span>{sentimentSrc}</span>
+      <span aria-hidden>·</span>
+      <span>fetched {fetched}</span>
+      {!snapshot.complete && <span className="text-amber-400">· partial fetch</span>}
     </div>
   );
 }
