@@ -55,6 +55,7 @@ export interface AnalysisResult {
     version: string | null;
     histogram: number[] | null;
     icon: string | null;
+    reviews: number | null; // lifetime review count
   };
   snapshot: { fetched_at: string; review_count: number; sort: string; complete: boolean };
   answer: Answer;

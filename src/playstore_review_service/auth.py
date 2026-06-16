@@ -99,6 +99,10 @@ def setup_auth_routes(app, oauth, session_factory: sessionmaker, settings: Setti
         try:
             token = await oauth.google.authorize_access_token(request)
         except Exception as exc:
+            # Log the OAuth provider's reason (e.g. "invalid_client") — safe, no secrets —
+            # so misconfig is diagnosable. The client only ever sees the generic code.
+            detail = getattr(exc, "error", "") or getattr(exc, "description", "")
+            logger.warning("oauth callback failed: %s %s", type(exc).__name__, detail)
             raise HTTPException(400, "oauth_failed") from exc
         info = token.get("userinfo") or {}
         sub = info.get("sub")

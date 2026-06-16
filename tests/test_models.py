@@ -75,11 +75,13 @@ def test_review_keeps_name_when_not_anonymized(reviews_page1):
     assert review.user_name == "Jane Doe"
 
 
-def test_review_silently_ignores_reply_fields(reviews_page1):
-    # Real library returns replyContent/repliedAt/appVersion; discarding is intentional.
+def test_review_captures_developer_reply(reviews_page1):
+    # N9: developer reply fields are now captured (unlocks "does the dev respond?" questions).
     review = Review.from_raw(reviews_page1[0])
-    assert not hasattr(review, "reply_content")
-    assert not hasattr(review, "replied_at")
+    assert review.reply_content == "Sorry! A fix ships next week."
+    assert review.replied_at == "2026-05-13T09:00:00"
+    # a review with no reply → None
+    assert Review.from_raw(reviews_page1[1]).reply_content is None
 
 
 def test_review_created_at_type_coercion():

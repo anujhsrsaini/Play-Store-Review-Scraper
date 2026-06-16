@@ -328,6 +328,7 @@ def _result_payload(record: Analysis, snap: Snapshot) -> dict:
             "version": meta.get("version"),
             "histogram": meta.get("histogram"),
             "icon": meta.get("icon"),
+            "reviews": meta.get("reviews"),  # lifetime review count (for the methodology strip)
         },
         "analysis_id": record.id,
         "snapshot": {

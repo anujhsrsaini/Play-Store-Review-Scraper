@@ -176,8 +176,10 @@ def test_analyze_full_flow_submit_poll_result(service):
     assert result["app"]["title"] == "Example Calc"
     assert result["snapshot"]["review_count"] == 30
     answer = result["answer"]
-    assert answer["sentiment_breakdown"]["source"] == "star_ratings"
-    assert answer["sentiment_breakdown"]["counted"] == 30
+    # N2: headline sentiment now comes from the app's lifetime histogram (fixture
+    # [10,20,30,40,100] → 200 ratings), not the 30-review sample.
+    assert answer["sentiment_breakdown"]["source"] == "lifetime_histogram"
+    assert answer["sentiment_breakdown"]["counted"] == 200
     assert "data_quality" in answer
     assert answer["summary"]
 
@@ -298,7 +300,7 @@ def test_openai_compatible_provider_used_when_configured(service, monkeypatch):
     assert answer["summary"].startswith("OCI Grok")
     # quote verification still runs: the fabricated quote is dropped, the real one kept
     assert [q["quote"] for q in answer["supporting_quotes"]] == ["keeps crashing constantly"]
-    assert answer["sentiment_breakdown"]["source"] == "star_ratings"
+    assert answer["sentiment_breakdown"]["source"] == "lifetime_histogram"
     config_mod.get_settings.cache_clear()
 
 

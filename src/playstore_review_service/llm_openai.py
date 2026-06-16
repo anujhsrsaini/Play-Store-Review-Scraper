@@ -72,36 +72,48 @@ def openai_compatible_analyze(
     if compartment_id:  # required by OCI; harmless for other OpenAI-compatible gateways
         headers["CompartmentId"] = compartment_id
 
-    body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": f"{SYSTEM_PROMPT}\n\n{schema_instruction()}"},
-            {"role": "user", "content": build_prompt(question, review_lines)},
-        ],
-        "temperature": TEMPERATURE,
-        "max_tokens": OCI_MAX_TOKENS,
-    }
+    messages = [
+        {"role": "system", "content": f"{SYSTEM_PROMPT}\n\n{schema_instruction()}"},
+        {"role": "user", "content": build_prompt(question, review_lines)},
+    ]
+
+    def call(msgs: list) -> tuple[dict[str, Any], str]:
+        body = {
+            "model": model,
+            "messages": msgs,
+            "temperature": TEMPERATURE,
+            "max_tokens": OCI_MAX_TOKENS,
+        }
+        try:
+            resp = post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers=headers,
+                json=body,
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+        except KeyError as exc:
+            raise LLMError("llm response missing choices/message") from exc
+        except Exception as exc:
+            # type-name only — never leak the API key (in the headers) or payload
+            raise LLMError(f"openai-compatible call failed: {type(exc).__name__}") from exc
+        return data, content
 
     try:
-        resp = post(
-            f"{base_url.rstrip('/')}/chat/completions",
-            headers=headers,
-            json=body,
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        content = data["choices"][0]["message"]["content"]
-    except KeyError as exc:
-        raise LLMError("llm response missing choices/message") from exc
-    except Exception as exc:
-        # type-name only — never leak the API key (it's in the request headers) or payload
-        raise LLMError(f"openai-compatible call failed: {type(exc).__name__}") from exc
-
-    payload = normalize_payload(extract_json(content))
+        data, content = call(messages)
+        payload = normalize_payload(extract_json(content))
+    except LLMError:
+        # One repair retry: re-ask with an explicit "valid JSON only" nudge (handles
+        # truncation / fenced-prose / minor schema drift) before giving up (N4).
+        nudge = "That was not valid JSON. Reply with ONLY the JSON object — no prose, no fences."
+        repair = [*messages, {"role": "user", "content": nudge}]
+        data, content = call(repair)
+        payload = normalize_payload(extract_json(content))
 
     usage = data.get("usage") or {}
-    tokens_in = usage.get("prompt_tokens") or estimate_tokens(str(body["messages"]))
+    tokens_in = usage.get("prompt_tokens") or estimate_tokens(str(messages))
     tokens_out = usage.get("completion_tokens") or estimate_tokens(content)
     # OCI reports the real billed cost as `cost_in_usd_ticks`. Empirically 1 tick = 1e-11 USD
     # (a tiny call billing ~$0.0002 reported ~20,060,000 ticks). Prefer this over our estimate.

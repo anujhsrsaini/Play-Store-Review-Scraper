@@ -28,6 +28,7 @@ from . import llm, llm_openai
 from .config import Settings, get_settings
 from .db import (
     Analysis,
+    AnalysisMetric,
     CachedReview,
     DailySpend,
     Job,
@@ -160,6 +161,8 @@ def ensure_snapshot(session: Session, job: Job, settings: Settings) -> Snapshot:
                 created_at=review.created_at,
                 app_version=review.app_version,
                 thumbs_up=review.thumbs_up,
+                reply_content=review.reply_content,
+                replied_at=review.replied_at,
             )
         )
     session.add(UsageLog(job_id=job.id, event="scrape", cost_usd=0.0))
@@ -201,10 +204,31 @@ def _analyze(session: Session, job: Job, snap: Snapshot, settings: Settings) -> 
         }
         for r in rows
     ]
-    sentiment = an.star_sentiment(r.score for r in rows)
-    curated = an.curate_reviews(reviews)
+    # Headline sentiment from the LIFETIME histogram (true population) when available,
+    # else the recency-biased sample — and flag if the sample diverges materially (N2).
+    sample_sentiment = an.star_sentiment(r.score for r in rows)
+    sentiment = (
+        an.sentiment_from_histogram((snap.app_meta or {}).get("histogram")) or sample_sentiment
+    )
+    sentiment_divergence = None
+    if sentiment["source"] == "lifetime_histogram":
+        gap = abs(sentiment["positive_pct"] - sample_sentiment["positive_pct"])
+        if gap >= 15:
+            skew = (
+                "more negative"
+                if sample_sentiment["positive_pct"] < sentiment["positive_pct"]
+                else "more positive"
+            )
+            sentiment_divergence = (
+                f"the {snap.review_count} sampled reviews skew {skew} "
+                f"than the lifetime ratings (by {round(gap)} pts)"
+            )
+
+    curated = an.curate_reviews(reviews, question=job.question)  # question-aware (N3)
     lines = an.format_review_lines(curated)
 
+    started = utcnow()
+    llm_fallback = False
     provider = settings.provider()
     if provider == "stub":
         payload = an.stub_analysis(job.question, curated)
@@ -236,31 +260,48 @@ def _analyze(session: Session, job: Job, snap: Snapshot, settings: Settings) -> 
                 payload, usage = llm.gemini_analyze(
                     job.question, lines, api_key=settings.gemini_api_key, model=model
                 )
+            payload = an.verify_quotes(
+                payload, {str(r["review_id"]): str(r["text"] or "") for r in reviews}
+            )
+            real_cost = usage.get("cost_usd")  # prefer provider's real billed cost (OCI ticks)
+            cost = (
+                float(real_cost)
+                if real_cost is not None
+                else llm.cost_usd(model, usage["tokens_in"], usage["tokens_out"])
+            )
+            reconcile_spend(session, cost - estimated)  # true-up reserved → actual
+            event = provider
+        except llm.LLMError:
+            # Don't fail the whole analysis on an LLM/parse error — degrade to the
+            # keyword stub so the user still gets a grounded (if shallower) answer (N4).
+            reconcile_spend(session, -estimated)  # release; nothing was billed to us
+            logger.warning("job %s: LLM failed, falling back to stub", job.id)
+            payload = an.stub_analysis(job.question, curated)
+            payload["caveats"] = [
+                *payload.get("caveats", []),
+                "Full LLM analysis was unavailable; showing a keyword-based fallback.",
+            ]
+            usage = {"tokens_in": 0, "tokens_out": 0}
+            model, cost, event, llm_fallback = "stub-fallback", 0.0, "llm_fallback", True
         except Exception:
             reconcile_spend(session, -estimated)  # release the reservation on failure
             raise
-        payload = an.verify_quotes(
-            payload, {str(r["review_id"]): str(r["text"] or "") for r in reviews}
-        )
-        # Prefer the provider's real billed cost (OCI ticks) over our price-table estimate.
-        real_cost = usage.get("cost_usd")
-        cost = (
-            float(real_cost)
-            if real_cost is not None
-            else llm.cost_usd(model, usage["tokens_in"], usage["tokens_out"])
-        )
-        reconcile_spend(session, cost - estimated)  # true-up reserved → actual
-        event = provider
 
     payload = an.clamp_answer(payload)
 
     payload["sentiment_breakdown"] = sentiment
+    sentiment_note = (
+        "sentiment % is from the app's lifetime star ratings"
+        if sentiment["source"] == "lifetime_histogram"
+        else f"sentiment % is from the {sentiment['counted']} sampled reviews' stars"
+    )
     payload["data_quality"] = (
         f"Based on {len(curated)} of {snap.review_count} fetched reviews "
         f"(sort={snap.sort}, {job.lang}/{job.country}, fetched {snap.fetched_at:%Y-%m-%d %H:%M} UTC"
-        f"{', INCOMPLETE fetch' if not snap.complete else ''}). "
-        "Review metrics are sample-based; lifetime ratings are point-in-time."
+        f"{', INCOMPLETE fetch' if not snap.complete else ''}); {sentiment_note}."
     )
+    if sentiment_divergence:
+        payload["caveats"] = [*payload.get("caveats", []), f"Note: {sentiment_divergence}."]
 
     record = Analysis(
         app_id=job.app_id,
@@ -281,6 +322,22 @@ def _analyze(session: Session, job: Job, snap: Snapshot, settings: Settings) -> 
             tokens_in=usage["tokens_in"],
             tokens_out=usage["tokens_out"],
             cost_usd=cost,
+        )
+    )
+    session.add(
+        AnalysisMetric(
+            job_id=job.id,
+            provider=provider,
+            model=model,
+            latency_ms=int((utcnow() - started).total_seconds() * 1000),
+            reviews_fetched=snap.review_count,
+            reviews_curated=len(curated),
+            verified_quotes=len(payload.get("supporting_quotes") or []),
+            dropped_quotes=sum(
+                1 for c in payload.get("caveats") or [] if "unverifiable quote" in c
+            ),
+            not_enough_data=bool(payload.get("not_enough_data")),
+            llm_fallback=llm_fallback,
         )
     )
     session.flush()
