@@ -1,0 +1,28 @@
+[
+  {
+    "reviewId": "r1",
+    "userName": "Jane Doe",
+    "userImage": "https://example.com/jane.png",
+    "content": "App keeps crashing after the latest update.",
+    "score": 1,
+    "thumbsUpCount": 12,
+    "reviewCreatedVersion": "4.3.1",
+    "at": "2026-05-12T10:30:00",
+    "replyContent": "Sorry! A fix ships next week.",
+    "repliedAt": "2026-05-13T09:00:00",
+    "appVersion": "4.3.1"
+  },
+  {
+    "reviewId": "r2",
+    "userName": "John Smith",
+    "userImage": "https://example.com/john.png",
+    "content": "Love the new dark mode!",
+    "score": 5,
+    "thumbsUpCount": 3,
+    "reviewCreatedVersion": "4.3.0",
+    "at": "2026-05-10T08:00:00",
+    "replyContent": null,
+    "repliedAt": null,
+    "appVersion": "4.3.0"
+  }
+]

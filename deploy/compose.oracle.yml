@@ -1,0 +1,35 @@
+# Oracle box overlay — co-locate behind the EXISTING containerized Caddy that also fronts
+# Metabase. Caddy is a CONTAINER here (not host-installed), so we share a Docker network and
+# let Caddy reach us by container name; NO host port is published.
+#
+# One-time on the box:  docker network create edge && docker network connect edge caddy
+# Deploy:               docker compose -f docker-compose.yml -f deploy/compose.oracle.yml up -d --build
+# Caddy (sudo edit of /opt/metabase/Caddyfile, then restart caddy):
+#                       reviews.topfolio.in { reverse_proxy reviewlens-web:8000 }
+
+networks:
+  default:
+  edge:
+    external: true
+
+services:
+  web:
+    container_name: reviewlens-web          # stable name for Caddy's reverse_proxy target
+    networks: [default, edge]
+    environment:
+      # Caddy connects over the Docker network (not 127.0.0.1). web publishes NO host port, so
+      # it's only reachable via this internal network — trusting X-Forwarded-* here is safe and
+      # lets the app see https:// (correct OAuth callback URLs).
+      FORWARDED_ALLOW_IPS: "*"
+    mem_limit: 768m
+    cpus: 1.0
+
+  worker:
+    mem_limit: 768m
+    cpus: 1.0
+
+  db:
+    mem_limit: 512m
+
+  caddy:
+    profiles: ["disabled"]                  # the box's own Caddy owns 80/443 — don't start ours

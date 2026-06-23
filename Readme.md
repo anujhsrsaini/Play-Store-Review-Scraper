@@ -1,64 +1,91 @@
-# Google Play Store App Reviews Scraper
+# Play Store Review Analysis Service
 
-![Python](https://img.shields.io/badge/Python-3.7.9-blue.svg)
+Ask anything about any Google Play app's reviews — answers grounded in real, cited
+reviews, with sentiment computed from star ratings. FastAPI backend + background worker
++ a simple web UI. Reviews are scraped via `google-play-scraper`, cached for 24h, and
+analyzed by Gemini (or a built-in keyword stub when no API key is set).
 
-## Table of Contents
+> Product contract: `spec.md` · Task ledger: `Plans.md`
 
-- [Introduction](#introduction)
-- [Features](#features)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Authors](#authors)
-
-## Introduction
-
-This Python script allows you to scrape information about the top 10 searched apps from the Google Play Store and collect their user reviews into CSV files. The collected data can be used for analysis of user sentiments, ratings, and feedback for these apps.
-
-## Features
-
-- Search for the top 10 searched apps on the Google Play Store.
-- Fetch detailed information about each app, including its name, developer, description, and more.
-- Download user reviews for each app, including ratings, comments, and timestamps.
-- Save app information and user reviews into separate CSV files for further analysis.
-
-## Installation
-
-1. Clone the repository:
-
-   ```sh
-   git clone https://github.com/anujhsrsaini/Play-Store-Review-Scraper.git
-   ```
-2. Navigate to the project directory:
-   ```sh 
-   cd Play-Store-Review-Scraper
-   ```
-3. Initiate a virtual environment and activate the virtual environment:
-   ```sh 
-   python -m venv venv
-   venv/Scripts/activate
-   ```
-3. Install the required libraries in the virtual environment
-   ```sh
-   pip install -r requirements.txt
-   ```
-4. You can make certain changes to the code to search for your desired keywords.
-
-## Usage
-
-Run the main script to fetch app information and user reviews:
+## Local testing — quickstart
 
 ```sh
-python fetch_reviews.py
+# 1. Setup (once)
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
+# 2. Optional: real LLM analysis (otherwise a no-cost stub analyzer is used)
+cp env.example .env        # then put your key in GEMINI_API_KEY=...
+
+# 3. Run (single process: web + in-process dev worker + SQLite)
+pmr-serve                  # → http://localhost:8000
 ```
 
-This script performs the following steps:
+Open **http://localhost:8000**, search an app (or paste a package id like
+`com.whatsapp`), pick it, ask a question (presets provided), and watch the job run:
+queued → fetching reviews (live count) → analyzing → answer with verified quotes,
+a star-ratings sentiment bar, and a data-quality banner.
 
-* Searches for the top 10 searched apps on the Google  Play Store in a specific country ***(default: India).***
-* Retrieves detailed app information for each of the top 10 apps.
-* Stores the app information in a CSV file.
-* For each app, it downloads user reviews, saving them in separate CSV files named after the app's package name.
-* You can analyze the collected data using your preferred data analysis tools, such as Python, SQL, or Tableau.
+What to expect locally:
 
-## Authors
+- **First question on an app**: scrapes up to `MAX_REVIEWS_PER_ANALYSIS` (default 500)
+  reviews with a polite 1s delay between pages — takes a minute or two.
+- **Re-asks / repeat questions**: served from the 24h snapshot + answer cache — instant
+  and free (no Gemini call).
+- **No `GEMINI_API_KEY`**: the flow still works end-to-end via a clearly-labeled
+  keyword-frequency stub. With a key: real Gemini (`gemini-2.5-flash-lite` by default),
+  structured output, and quote verification (fabricated quotes are dropped).
+- **Spend guard**: `GLOBAL_DAILY_SPEND_CAP_USD` (default $5) hard-stops Gemini calls
+  for the day when the estimated cost would cross it.
 
-- **[Anuj Saini](https://www.linkedin.com/in/anuj-saini-7230a0257/)**
+## Architecture (localhost shape)
+
+```
+Browser (static/index.html)
+   │  POST /api/analyze → job_id      GET /api/jobs/{id} (poll)
+   ▼
+FastAPI (webapp.py) ──► SQLite/Postgres: jobs, review_snapshots(24h TTL),
+   │                     cached_reviews (PII-free), analyses (answer cache), usage_log
+   ▼
+Worker (worker.py — in-process thread for dev; `pmr-worker` standalone for prod)
+   scrape (cache-first, capped, backoff) → curate sample → Gemini/stub → verify quotes
+```
+
+- DB: SQLite by default (`local.db`); set `DATABASE_URL` to Postgres for production
+  (the job queue then uses `FOR UPDATE SKIP LOCKED`).
+- PII: reviewer names/images are dropped at the scraper boundary AND the DB schema has
+  no column for them.
+- Security: the Gemini key never leaves the server; review text and questions are
+  treated as untrusted data (delimiter stripping, no tools, escaped rendering).
+
+## Configuration (env vars — see `env.example`)
+
+| Var | Default | Meaning |
+|---|---|---|
+| `GEMINI_API_KEY` | *(empty → stub)* | Owner's Gemini key, server-side only |
+| `GEMINI_DEFAULT_MODEL` | `gemini-2.5-flash-lite` | Analysis model |
+| `DATABASE_URL` | `sqlite:///./local.db` | SQLAlchemy URL |
+| `MAX_REVIEWS_PER_ANALYSIS` | `500` | Reviews scraped per app snapshot |
+| `SCRAPE_CACHE_TTL_HOURS` | `24` | Snapshot reuse window |
+| `GLOBAL_DAILY_SPEND_CAP_USD` | `5` | Daily Gemini kill-switch |
+| `SCRAPE_DELAY_SECONDS` | `1.0` | Polite inter-page delay |
+| `DEV_INPROCESS_WORKER` | `1` | Run worker inside the web process (dev) |
+
+## Development
+
+```sh
+pytest                 # 69 tests, no network needed
+ruff check . && ruff format --check . && mypy src
+```
+
+## Disclaimers
+
+- Not affiliated with or endorsed by Google. Scrapes publicly visible Play Store pages
+  via the unofficial `google-play-scraper` library, which can break or be rate-limited
+  at any time; data is a point-in-time snapshot, not authoritative.
+- For personal/educational market research. You are responsible for complying with
+  Google Play's Terms of Service and applicable laws when operating this software.
+- Scraped reviews contain user-generated content. Reviewer names/images are dropped at
+  ingest; do not redistribute scraped datasets without assessing your own data-protection
+  obligations.
+- No warranty; use at your own risk.
