@@ -1,0 +1,17 @@
+# Review Lens vhost — APPEND this block to the Caddyfile that already serves Metabase,
+# then reload Caddy (host install:  sudo systemctl reload caddy
+#                     container:    docker exec <caddy-container> caddy reload --config /etc/caddy/Caddyfile).
+#
+# Replace reviews.example.com with your chosen subdomain (add the matching A record in
+# Route 53 -> the Oracle box public IP). Caddy auto-provisions the Let's Encrypt cert on
+# first request, so make sure ports 80 + 443 are open (OCI security list AND host iptables).
+
+reviews.example.com {
+	encode zstd gzip
+	header {
+		# HSTS is meaningful over the HTTPS Caddy terminates; the app still sets CSP/X-Frame/etc.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	reverse_proxy 127.0.0.1:8011
+}

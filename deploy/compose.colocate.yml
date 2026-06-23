@@ -1,0 +1,29 @@
+# Co-location overlay — for an Oracle box that ALREADY runs Caddy (e.g. for Metabase).
+#
+# What it changes vs. the base docker-compose.yml:
+#   - publishes `web` ONLY on localhost:8011 (the box's existing Caddy proxies to it)
+#   - disables our bundled `caddy` service (the host Caddy owns 80/443)
+#   - adds conservative memory/cpu caps so a burst can't starve Metabase
+#
+# Bring up with BOTH files (this one second so it wins the merge):
+#   docker compose -f docker-compose.yml -f deploy/compose.colocate.yml up -d --build
+#
+# For a STANDALONE box / 2nd VM, ignore this file and use the base compose alone
+# (the bundled Caddy then terminates TLS for your subdomain).
+
+services:
+  web:
+    ports:
+      - "127.0.0.1:8011:8000"   # reachable only from the box; Caddy reverse-proxies here
+    mem_limit: 512m
+    cpus: 1.0
+
+  worker:
+    mem_limit: 512m
+    cpus: 1.0
+
+  db:
+    mem_limit: 512m
+
+  caddy:
+    profiles: ["disabled"]      # never started here; the host's existing Caddy fronts TLS
