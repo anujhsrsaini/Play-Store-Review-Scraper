@@ -50,6 +50,11 @@ class Settings:
     session_secret: str
     session_cookie_secure: bool  # set True in prod (HTTPS) so the session cookie is Secure
     per_user_daily_analyses: int
+    # No-login free trial: anonymous visitors get a small per-browser daily quota before the
+    # sign-in gate. Inert unless auth is also enabled (see anon_trial_active).
+    anon_trial_enabled: bool
+    anon_daily_analyses: int
+    anon_spend_fraction: float  # disable anon path once today's spend >= fraction * global cap
     max_reviews_per_analysis: int
     scrape_cache_ttl_hours: int
     global_daily_spend_cap_usd: float
@@ -58,6 +63,10 @@ class Settings:
 
     def auth_enabled(self) -> bool:
         return bool(self.google_client_id and self.google_client_secret)
+
+    def anon_trial_active(self) -> bool:
+        """Anonymous free trial is live only when auth exists to gate into (off in local dev)."""
+        return self.auth_enabled() and self.anon_trial_enabled
 
     def provider(self) -> str:
         """Resolve the active LLM provider. Order: explicit OpenAI-compatible (OCI) →
@@ -87,8 +96,11 @@ def get_settings() -> Settings:
         google_redirect_uri=os.environ.get("GOOGLE_REDIRECT_URI", ""),
         session_secret=os.environ.get("SESSION_SECRET", DEFAULT_SESSION_SECRET),
         session_cookie_secure=os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
-        per_user_daily_analyses=int(os.environ.get("PER_USER_DAILY_ANALYSES", "15")),
-        max_reviews_per_analysis=int(os.environ.get("MAX_REVIEWS_PER_ANALYSIS", "500")),
+        per_user_daily_analyses=int(os.environ.get("PER_USER_DAILY_ANALYSES", "5")),
+        anon_trial_enabled=os.environ.get("ANON_TRIAL_ENABLED", "0") == "1",
+        anon_daily_analyses=int(os.environ.get("ANON_DAILY_ANALYSES", "1")),
+        anon_spend_fraction=float(os.environ.get("ANON_SPEND_FRACTION", "0.5")),
+        max_reviews_per_analysis=int(os.environ.get("MAX_REVIEWS_PER_ANALYSIS", "1000")),
         scrape_cache_ttl_hours=int(os.environ.get("SCRAPE_CACHE_TTL_HOURS", "24")),
         global_daily_spend_cap_usd=float(os.environ.get("GLOBAL_DAILY_SPEND_CAP_USD", "5")),
         scrape_delay_seconds=float(os.environ.get("SCRAPE_DELAY_SECONDS", "1.0")),

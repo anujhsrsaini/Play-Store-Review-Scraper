@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { ApiError, api, type AnalysisResult } from "@/lib/api";
+import { ApiError, api, type AnalysisResult, type Period } from "@/lib/api";
 
 type Phase = "idle" | "working" | "done" | "error";
 
@@ -33,11 +33,11 @@ export function useAnalysis(onComplete?: () => void) {
   }, []);
 
   const submit = useCallback(
-    async (appId: string, question: string) => {
+    async (appId: string, question: string, period: Period = "90d") => {
       stop();
       setState({ phase: "working", status: "submitting", progress: 0 });
       try {
-        const r = await api.analyze(appId, question);
+        const r = await api.analyze(appId, question, period);
         if (r.cache_hit && r.result) {
           setState({ phase: "done", progress: 0, result: r.result });
           onComplete?.();
@@ -67,6 +67,14 @@ export function useAnalysis(onComplete?: () => void) {
           }
         }, 1200);
       } catch (e) {
+        // Quota/trial exhausted: not an error — hand back to idle so Home shows the
+        // sign-in gate (anon) or the daily-limit card (signed-in). Refresh /api/me.
+        if (e instanceof ApiError && e.status === 429) {
+          stop();
+          setState({ phase: "idle", progress: 0 });
+          onComplete?.();
+          return;
+        }
         setState({ phase: "error", progress: 0, error: errMsg(e) });
       }
     },

@@ -35,10 +35,11 @@ export function Search({ onPick }: { onPick: (app: AppSummary) => void }) {
     <div>
       <div className="flex gap-2">
         <Input
+          autoFocus
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && run()}
-          placeholder="Search an app (e.g. “Ultrahuman”) or paste a package id"
+          placeholder="Search any app — “Spotify”, “Swiggy”… or paste a package id"
         />
         <Button onClick={run} loading={loading} size="lg">
           <SearchIcon className="h-4 w-4" /> Search

@@ -35,7 +35,7 @@ export function Result({
           </div>
         </div>
         <div className="ml-auto flex shrink-0 gap-2">
-          <ShareButton token={share_token} />
+          {share_token && <ShareButton token={share_token} />}
           {onAskAnother && (
             <Button variant="ghost" size="sm" onClick={onAskAnother}>
               <MessageSquarePlus className="h-4 w-4" /> Ask another
@@ -57,16 +57,18 @@ export function Result({
           )}
         </section>
 
+        <RatingCompare result={result} />
+
         <div className="grid gap-6 sm:grid-cols-2">
           {answer.sentiment_breakdown && (
             <section>
-              <h3 className={sectionTitle}>Sentiment</h3>
+              <h3 className={sectionTitle}>Sentiment · {answer.period_coverage?.label ?? "selected period"}</h3>
               <SentimentDonut s={answer.sentiment_breakdown} />
             </section>
           )}
           {app.histogram && app.histogram.length === 5 && (
             <section>
-              <h3 className={sectionTitle}>Lifetime ratings</h3>
+              <h3 className={sectionTitle}>Play Store ratings · all-time</h3>
               <RatingHistogram histogram={app.histogram} />
             </section>
           )}
@@ -154,31 +156,101 @@ function CaveatsBanner({ caveats, dataQuality }: { caveats: string[]; dataQualit
   );
 }
 
+function RatingCompare({ result }: { result: AnalysisResult }) {
+  const { app, answer } = result;
+  const cov = answer.period_coverage;
+  const overall = app.score;
+  const recent = cov?.avg_rating ?? null;
+  if (overall == null && recent == null) return null;
+  const delta = overall != null && recent != null ? recent - overall : null;
+  return (
+    <section>
+      <h3 className={sectionTitle}>Rating · all-time vs recent</h3>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <RatingStat
+          label="Play Store · all-time"
+          value={overall}
+          sub={app.ratings != null ? `${app.ratings.toLocaleString()} ratings` : "official rating"}
+        />
+        <RatingStat
+          label={`Analyzed · ${cov?.label ?? "selected period"}`}
+          value={recent}
+          sub={cov ? `${cov.reviews.toLocaleString()} reviews` : "sampled reviews"}
+          delta={delta}
+        />
+      </div>
+    </section>
+  );
+}
+
+function RatingStat({
+  label,
+  value,
+  sub,
+  delta,
+}: {
+  label: string;
+  value: number | null;
+  sub: string;
+  delta?: number | null;
+}) {
+  const trend =
+    delta == null || Math.abs(delta) < 0.05
+      ? null
+      : delta > 0
+        ? { cls: "text-emerald-300", txt: `▲ ${delta.toFixed(1)} vs all-time` }
+        : { cls: "text-rose-300", txt: `▼ ${Math.abs(delta).toFixed(1)} vs all-time` };
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="mt-1 flex items-baseline gap-1.5">
+        <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+        <span className="text-2xl font-semibold tabular-nums text-white">
+          {value != null ? value.toFixed(2) : "—"}
+        </span>
+        {trend && <span className={`text-xs font-medium ${trend.cls}`}>{trend.txt}</span>}
+      </div>
+      <div className="mt-0.5 text-xs text-slate-400">{sub}</div>
+    </div>
+  );
+}
+
 function MethodologyStrip({ result }: { result: AnalysisResult }) {
-  const { app, snapshot, answer } = result;
-  const lifetime = app.reviews ? ` of ${app.reviews.toLocaleString()}` : "";
+  const { snapshot, answer } = result;
+  const cov = answer.period_coverage;
+  const label = cov?.label ?? "the selected period";
   const sortLabel = snapshot.sort.replace(/^Sort\./, "").toLowerCase();
   const fetched = new Date(snapshot.fetched_at).toLocaleString(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
   });
-  const sentimentSrc =
-    answer.sentiment_breakdown?.source === "lifetime_histogram"
-      ? "sentiment from lifetime ★ ratings"
-      : "sentiment from the sampled reviews";
+  const analyzed = cov
+    ? `${cov.reviews.toLocaleString()} reviews from ${cov.label}`
+    : `${snapshot.review_count.toLocaleString()} reviews`;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-white/10 bg-white/[0.02] px-4 py-2 text-[11px] text-slate-400 sm:px-5">
       <Info className="h-3.5 w-3.5 text-slate-500" />
       <span>
-        Analyzed <strong className="font-medium text-slate-300">{snapshot.review_count}{lifetime}</strong> reviews
+        Analyzed <strong className="font-medium text-slate-300">{analyzed}</strong>
       </span>
+      {cov?.from && cov?.to && (
+        <>
+          <span aria-hidden>·</span>
+          <span>
+            {cov.from} → {cov.to}
+          </span>
+        </>
+      )}
       <span aria-hidden>·</span>
       <span>{sortLabel}</span>
       <span aria-hidden>·</span>
-      <span>{sentimentSrc}</span>
+      <span>sentiment from reviews in {label}</span>
       <span aria-hidden>·</span>
       <span>fetched {fetched}</span>
       {!snapshot.complete && <span className="text-amber-400">· partial fetch</span>}
+      {cov && cov.complete === false && (
+        <span className="text-amber-400">· window not fully covered</span>
+      )}
     </div>
   );
 }

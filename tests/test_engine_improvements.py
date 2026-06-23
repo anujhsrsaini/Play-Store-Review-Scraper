@@ -3,11 +3,17 @@ eval (N8) that asserts grounding invariants on every (reviews, question) case.""
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from playstore_review_service.analysis import (
+    average_score,
     clamp_answer,
     curate_reviews,
+    date_range,
+    in_period,
+    period_cutoff_iso,
     sentiment_from_histogram,
     stub_analysis,
     verify_quotes,
@@ -37,6 +43,77 @@ def test_sentiment_from_histogram():
     assert sentiment_from_histogram(None) is None
     assert sentiment_from_histogram([1, 2, 3]) is None
     assert sentiment_from_histogram([0, 0, 0, 0, 0]) is None
+
+
+# ----------------------------------------------------------- period selection + scoping
+
+
+def test_period_cutoff_and_filtering():
+    now = datetime(2026, 6, 16, 12, 0, 0)
+    assert period_cutoff_iso("30d", now) == "2026-05-17T12:00:00"
+    assert period_cutoff_iso("60d", now) == "2026-04-17T12:00:00"
+    # there is no lifetime view: an unknown key falls back to the default window, never None
+    assert period_cutoff_iso("all", now) == period_cutoff_iso("90d", now)
+    reviews = [
+        {"review_id": "fresh", "score": 5, "text": "good", "created_at": "2026-06-10"},
+        {"review_id": "old", "score": 1, "text": "bad", "created_at": "2026-01-01"},
+        {"review_id": "undated", "score": 3, "text": "meh", "created_at": None},
+    ]
+    kept = {r["review_id"] for r in in_period(reviews, period_cutoff_iso("30d", now))}
+    assert kept == {"fresh"}  # old + undated excluded from a specific window
+    assert date_range(reviews) == ("2026-01-01", "2026-06-10")
+
+
+def test_average_score():
+    assert average_score([5, 4, 3]) == 4.0
+    assert average_score([5, None, 0, 4]) == 4.5  # None + 0 ignored
+    assert average_score([None, 0]) is None
+    assert average_score([]) is None
+
+
+def test_period_coverage_exposes_sample_rating(service):
+    client, sf = service
+    body = client.post(
+        "/api/analyze", json={"app_id": APP_ID, "question": "how is it?", "period": "90d"}
+    ).json()
+    process_one(sf)
+    result = client.get(f"/api/jobs/{body['job_id']}").json()["result"]
+    cov = result["answer"]["period_coverage"]
+    assert cov["avg_rating"] is not None and 1.0 <= cov["avg_rating"] <= 5.0
+    # the all-time aggregate (app.score) is a SEPARATE number from the sample rating
+    assert result["app"]["score"] is not None
+
+
+def test_period_scopes_cache_and_sentiment(service):
+    """Same question, two periods → two distinct cached analyses, each scoped."""
+    client, sf = service
+    a_90 = client.post(
+        "/api/analyze", json={"app_id": APP_ID, "question": "how is it?", "period": "90d"}
+    ).json()
+    a_30 = client.post(
+        "/api/analyze", json={"app_id": APP_ID, "question": "how is it?", "period": "30d"}
+    ).json()
+    # distinct jobs (period is part of the single-flight key)
+    assert a_90["job_id"] and a_30["job_id"] and a_90["job_id"] != a_30["job_id"]
+    process_one(sf)
+    process_one(sf)
+    r_90 = client.get(f"/api/jobs/{a_90['job_id']}").json()["result"]
+    r_30 = client.get(f"/api/jobs/{a_30['job_id']}").json()["result"]
+    assert r_90["period"] == "90d" and r_30["period"] == "30d"
+    assert r_30["answer"]["period_coverage"]["period"] == "30d"
+    assert r_30["answer"]["sentiment_breakdown"]["source"] == "period_sample"
+    # lifetime is rejected by the request validator (only 30/60/90 allowed)
+    assert (
+        client.post(
+            "/api/analyze", json={"app_id": APP_ID, "question": "how is it?", "period": "all"}
+        ).status_code
+        == 422
+    )
+    # re-asking the same (question, period) is now a free cache hit
+    again = client.post(
+        "/api/analyze", json={"app_id": APP_ID, "question": "how is it?", "period": "30d"}
+    ).json()
+    assert again["cache_hit"] is True
 
 
 # ----------------------------------------------------------- N3: question-aware curation
