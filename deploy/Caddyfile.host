@@ -1,0 +1,28 @@
+# Central host Caddyfile for the multi-app box — install to /opt/caddy/Caddyfile and point
+# the host Caddy at it (Debian package default is /etc/caddy/Caddyfile; either symlink or copy).
+#
+# Globals are defined once here; every app contributes ONE vhost snippet, symlinked into
+# /opt/caddy/apps.d/ and glob-imported below. Adding an app never edits this file.
+#
+#   ln -sf /opt/apps/<app>/deploy/<app>.caddy /opt/caddy/apps.d/<app>.caddy
+#   caddy validate --config /opt/caddy/Caddyfile && sudo systemctl reload caddy
+
+{
+	email ops@example.com          # Let's Encrypt account + expiry notices (set yours)
+	# admin off                     # optional: disable the local admin API
+}
+
+# Shared hardening + compression — apps `import common` in their snippet.
+(common) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# One vhost file per app (e.g. /opt/apps/reviews/deploy/reviews.caddy symlinked here).
+import /opt/caddy/apps.d/*.caddy

@@ -36,7 +36,7 @@ SESSION_COOKIE_SECURE=1
 DOMAIN=<your-subdomain>
 POSTGRES_PASSWORD=<strong>
 GLOBAL_DAILY_SPEND_CAP_USD=20
-PER_USER_DAILY_ANALYSES=15
+PER_USER_DAILY_ANALYSES=5        # free analyses per user per UTC day (cached re-asks are free)
 ```
 
 ## Run
@@ -49,6 +49,29 @@ docker compose ps                 # health
 
 Caddy obtains the TLS cert automatically on first request to `https://<your-subdomain>`.
 Tables are created on first start (idempotent). Updates: `git pull && docker compose up -d --build`.
+
+## Co-locating on a box that already runs Caddy (e.g. alongside Metabase)
+
+When the box already has a Caddy serving another app, **don't** run our bundled Caddy — let the
+existing one front both. Two drop-ins under `deploy/` do this:
+
+1. **Add the vhost** in `deploy/reviews.caddy` to the existing Caddyfile (replace the subdomain),
+   then reload: host install `sudo systemctl reload caddy`; containerized
+   `docker exec <caddy-container> caddy reload --config /etc/caddy/Caddyfile`.
+2. **Run our stack with the co-location overlay** (publishes `web` on `127.0.0.1:8011`, disables
+   our bundled Caddy, caps memory so a burst can't starve the neighbour):
+
+   ```sh
+   docker compose -f docker-compose.yml -f deploy/compose.colocate.yml up -d --build
+   ```
+
+3. **Route 53**: add an `A` record for the subdomain → the box's public IP (the same IP Metabase
+   uses). **OCI security list + host `iptables`** must allow 80/443 (Oracle's images REJECT by
+   default even when the security list allows — insert ACCEPT rules above the REJECT).
+
+The app trusts `X-Forwarded-*` only from `127.0.0.1` (`FORWARDED_ALLOW_IPS`), which is exactly
+right when the local Caddy proxies to `127.0.0.1:8011`. For a standalone box / dedicated VM,
+skip all of this and use the base compose alone (bundled Caddy terminates TLS).
 
 ## Notes
 
