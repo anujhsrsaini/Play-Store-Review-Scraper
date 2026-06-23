@@ -16,7 +16,18 @@ import hashlib
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
+from datetime import datetime, timedelta
 from typing import Any
+
+# Review time-window options. We only analyze RECENT reviews (no lifetime view):
+# 30 / 60 / 90 days, each capped at MAX_REVIEWS_PER_ANALYSIS newest reviews.
+PERIOD_DAYS: dict[str, int] = {"30d": 30, "60d": 60, "90d": 90}
+PERIOD_LABELS = {
+    "30d": "the last 30 days",
+    "60d": "the last 60 days",
+    "90d": "the last 90 days",
+}
+DEFAULT_PERIOD = "90d"
 
 APPROX_CHARS_PER_TOKEN = 4
 DEFAULT_CONTEXT_TOKEN_BUDGET = 40_000  # spec §4.3
@@ -58,6 +69,12 @@ def star_sentiment(scores: Iterable[int | None]) -> dict[str, Any]:
     return _sentiment_pcts(pos, neu, neg, source="star_ratings_sample")
 
 
+def average_score(scores: Iterable[int | float | None]) -> float | None:
+    """Mean star rating over a corpus (e.g. the analyzed sample), or None if no usable scores."""
+    vals = [float(s) for s in scores if isinstance(s, int | float) and s]
+    return round(sum(vals) / len(vals), 2) if vals else None
+
+
 def _sentiment_pcts(pos: int, neu: int, neg: int, *, source: str) -> dict[str, Any]:
     total = pos + neg + neu
 
@@ -85,6 +102,29 @@ def sentiment_from_histogram(histogram: Any) -> dict[str, Any] | None:
     if sum(c) <= 0:
         return None
     return _sentiment_pcts(c[3] + c[4], c[2], c[0] + c[1], source="lifetime_histogram")
+
+
+def period_cutoff_iso(period: str, now: datetime) -> str:
+    """ISO cutoff for a period key. Unknown keys fall back to the default window — there is
+    no unbounded/lifetime option. `now` is injected for testability."""
+    days = PERIOD_DAYS.get(period) or PERIOD_DAYS[DEFAULT_PERIOD]
+    return (now - timedelta(days=days)).isoformat()
+
+
+def in_period(
+    reviews: Sequence[Mapping[str, Any]], cutoff_iso: str | None
+) -> list[Mapping[str, Any]]:
+    """Reviews with created_at >= cutoff (ISO strings compare lexicographically). cutoff
+    None → all. Reviews lacking a date are excluded from a specific window."""
+    if cutoff_iso is None:
+        return list(reviews)
+    return [r for r in reviews if (r.get("created_at") or "") >= cutoff_iso]
+
+
+def date_range(reviews: Sequence[Mapping[str, Any]]) -> tuple[str | None, str | None]:
+    """(earliest, latest) created_at (date part) across reviews that have one."""
+    dates = sorted((r.get("created_at") or "")[:10] for r in reviews if r.get("created_at"))
+    return (dates[0], dates[-1]) if dates else (None, None)
 
 
 def question_keywords(question: str) -> list[str]:

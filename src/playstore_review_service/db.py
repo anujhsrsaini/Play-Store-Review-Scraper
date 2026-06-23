@@ -96,6 +96,7 @@ class Job(Base):
     lang: Mapped[str] = mapped_column(String(8))
     question: Mapped[str] = mapped_column(Text)
     question_hash: Mapped[str] = mapped_column(String(64), index=True)
+    period: Mapped[str] = mapped_column(String(8), default="90d")  # review time-window
     status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)  # reviews fetched so far
     error: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -113,7 +114,7 @@ class Analysis(Base):
 
     __tablename__ = "analyses"
     __table_args__ = (
-        UniqueConstraint("app_id", "country", "lang", "question_hash", "snapshot_id"),
+        UniqueConstraint("app_id", "country", "lang", "question_hash", "period", "snapshot_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -123,6 +124,7 @@ class Analysis(Base):
     country: Mapped[str] = mapped_column(String(8))
     lang: Mapped[str] = mapped_column(String(8))
     question_hash: Mapped[str] = mapped_column(String(64), index=True)
+    period: Mapped[str] = mapped_column(String(8), default="90d")
     snapshot_id: Mapped[int] = mapped_column(ForeignKey("review_snapshots.id"))
     answer: Mapped[dict] = mapped_column(JSON)
     model: Mapped[str] = mapped_column(String(64), default="stub")

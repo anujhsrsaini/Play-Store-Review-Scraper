@@ -178,6 +178,7 @@ def _analyze(session: Session, job: Job, snap: Snapshot, settings: Settings) -> 
                 Analysis.country == job.country,
                 Analysis.lang == job.lang,
                 Analysis.question_hash == job.question_hash,
+                Analysis.period == job.period,
                 Analysis.snapshot_id == snap.id,
             )
         )
@@ -204,27 +205,22 @@ def _analyze(session: Session, job: Job, snap: Snapshot, settings: Settings) -> 
         }
         for r in rows
     ]
-    # Headline sentiment from the LIFETIME histogram (true population) when available,
-    # else the recency-biased sample — and flag if the sample diverges materially (N2).
-    sample_sentiment = an.star_sentiment(r.score for r in rows)
-    sentiment = (
-        an.sentiment_from_histogram((snap.app_meta or {}).get("histogram")) or sample_sentiment
-    )
-    sentiment_divergence = None
-    if sentiment["source"] == "lifetime_histogram":
-        gap = abs(sentiment["positive_pct"] - sample_sentiment["positive_pct"])
-        if gap >= 15:
-            skew = (
-                "more negative"
-                if sample_sentiment["positive_pct"] < sentiment["positive_pct"]
-                else "more positive"
-            )
-            sentiment_divergence = (
-                f"the {snap.review_count} sampled reviews skew {skew} "
-                f"than the lifetime ratings (by {round(gap)} pts)"
-            )
+    # Scope the corpus to the selected review window (30/60/90 days — no lifetime view).
+    period = job.period or an.DEFAULT_PERIOD
+    cutoff = an.period_cutoff_iso(period, utcnow())
+    corpus = an.in_period(reviews, cutoff)
+    earliest, latest = an.date_range(corpus)
+    # Does the newest-N sample (capped at MAX_REVIEWS_PER_ANALYSIS) actually reach back past
+    # the window's start? If its oldest review is more recent than the cutoff, older in-window
+    # reviews were truncated by the cap and weren't analyzed.
+    oldest_sampled = an.date_range(reviews)[0]
+    period_complete = oldest_sampled is None or oldest_sampled <= cutoff[:10]
 
-    curated = an.curate_reviews(reviews, question=job.question)  # question-aware (N3)
+    # Headline sentiment is the star ratings of the reviews IN the selected window, so the %
+    # always matches the period the user picked.
+    sentiment = {**an.star_sentiment(r["score"] for r in corpus), "source": "period_sample"}
+
+    curated = an.curate_reviews(corpus, question=job.question)  # question-aware (N3)
     lines = an.format_review_lines(curated)
 
     started = utcnow()
@@ -261,7 +257,7 @@ def _analyze(session: Session, job: Job, snap: Snapshot, settings: Settings) -> 
                     job.question, lines, api_key=settings.gemini_api_key, model=model
                 )
             payload = an.verify_quotes(
-                payload, {str(r["review_id"]): str(r["text"] or "") for r in reviews}
+                payload, {str(r["review_id"]): str(r["text"] or "") for r in corpus}
             )
             real_cost = usage.get("cost_usd")  # prefer provider's real billed cost (OCI ticks)
             cost = (
@@ -290,24 +286,44 @@ def _analyze(session: Session, job: Job, snap: Snapshot, settings: Settings) -> 
     payload = an.clamp_answer(payload)
 
     payload["sentiment_breakdown"] = sentiment
-    sentiment_note = (
-        "sentiment % is from the app's lifetime star ratings"
-        if sentiment["source"] == "lifetime_histogram"
-        else f"sentiment % is from the {sentiment['counted']} sampled reviews' stars"
-    )
+    period_label = an.PERIOD_LABELS.get(period, "all time")
+    payload["period"] = period
+    payload["period_coverage"] = {
+        "period": period,
+        "label": period_label,
+        "from": earliest,
+        "to": latest,
+        "reviews": len(corpus),
+        "complete": period_complete,
+        # Average ★ of the reviews we actually analyzed — the "recent" rating, distinct from
+        # Google's all-time aggregate (app.score / the rating-distribution histogram).
+        "avg_rating": an.average_score(r["score"] for r in corpus),
+    }
+    sentiment_note = f"sentiment % is from these {sentiment['counted']} reviews' stars"
+    span = f" ({earliest}–{latest})" if earliest else ""
+    scope = f"{len(curated)} reviews from {period_label}{span}"
     payload["data_quality"] = (
-        f"Based on {len(curated)} of {snap.review_count} fetched reviews "
+        f"Based on {scope} "
         f"(sort={snap.sort}, {job.lang}/{job.country}, fetched {snap.fetched_at:%Y-%m-%d %H:%M} UTC"
         f"{', INCOMPLETE fetch' if not snap.complete else ''}); {sentiment_note}."
     )
-    if sentiment_divergence:
-        payload["caveats"] = [*payload.get("caveats", []), f"Note: {sentiment_divergence}."]
+    extra_caveats = []
+    if not corpus:
+        extra_caveats.append(f"No reviews were found in {period_label} within the fetched sample.")
+    elif not period_complete:
+        extra_caveats.append(
+            f"The fetched sample only reaches back to {oldest_sampled}, so older reviews "
+            f"in {period_label} weren't included."
+        )
+    if extra_caveats:
+        payload["caveats"] = [*payload.get("caveats", []), *extra_caveats]
 
     record = Analysis(
         app_id=job.app_id,
         country=job.country,
         lang=job.lang,
         question_hash=job.question_hash,
+        period=period,
         snapshot_id=snap.id,
         answer=payload,
         model=model,

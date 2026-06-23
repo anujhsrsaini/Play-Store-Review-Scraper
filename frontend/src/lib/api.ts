@@ -33,6 +33,18 @@ export interface Sentiment {
   source: string;
 }
 
+export type Period = "30d" | "60d" | "90d";
+
+export interface PeriodCoverage {
+  period: Period;
+  label: string;
+  from: string | null;
+  to: string | null;
+  reviews: number;
+  complete: boolean;
+  avg_rating: number | null; // mean ★ of the analyzed sample (recent), vs app.score (all-time)
+}
+
 export interface Answer {
   summary: string;
   not_enough_data: boolean;
@@ -41,10 +53,12 @@ export interface Answer {
   caveats: string[];
   sentiment_breakdown?: Sentiment;
   data_quality?: string;
+  period?: Period;
+  period_coverage?: PeriodCoverage;
 }
 
 export interface AnalysisResult {
-  share_token: string;
+  share_token?: string; // omitted for anonymous trial results (sharing is a signed-in feature)
   model: string;
   app: {
     app_id: string;
@@ -58,11 +72,13 @@ export interface AnalysisResult {
     reviews: number | null; // lifetime review count
   };
   snapshot: { fetched_at: string; review_count: number; sort: string; complete: boolean };
+  period?: Period;
   answer: Answer;
 }
 
 export interface Me {
   authenticated: boolean;
+  is_anon?: boolean; // anonymous free-trial visitor (not signed in)
   email: string;
   name: string;
   used: number;
@@ -75,6 +91,7 @@ export interface Health {
   provider: string;
   llm: string;
   auth: boolean;
+  anon_trial?: boolean;
 }
 
 export type JobStatus = "queued" | "scraping" | "analyzing" | "done" | "error";
@@ -131,10 +148,10 @@ export const api = {
   me: () => req<Me>("/api/me"),
   search: (q: string, country = "in", lang = "en") =>
     req<AppSummary[]>(`/api/search?q=${encodeURIComponent(q)}&country=${country}&lang=${lang}`),
-  analyze: (appId: string, question: string, country = "in", lang = "en") =>
+  analyze: (appId: string, question: string, period: Period = "90d", country = "in", lang = "en") =>
     req<SubmitResult>("/api/analyze", {
       method: "POST",
-      body: JSON.stringify({ app_id: appId, question, country, lang }),
+      body: JSON.stringify({ app_id: appId, question, country, lang, period }),
     }),
   job: (jobId: string) => req<JobState>(`/api/jobs/${jobId}`),
   analysis: (id: number | string) => req<AnalysisResult>(`/api/analysis/${id}`),

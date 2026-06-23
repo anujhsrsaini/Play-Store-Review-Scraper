@@ -58,6 +58,8 @@ class AnalyzeRequest(BaseModel):
     question: str = Field(min_length=3, max_length=500)
     country: str = Field(default="us", pattern=r"^[a-z]{2}$")
     lang: str = Field(default="en", pattern=r"^[a-z]{2}$")
+    # Review time-window: sentiment + analysis are scoped to this period (see analysis.PERIOD_DAYS).
+    period: str = Field(default="90d", pattern=r"^(30d|60d|90d)$")
 
 
 def create_app() -> FastAPI:
@@ -105,8 +107,8 @@ def create_app() -> FastAPI:
     oauth = auth_mod.make_oauth(settings)
     auth_mod.setup_auth_routes(app, oauth, session_factory, settings)
 
-    def current_user(request: Request) -> User:
-        return auth_mod.resolve_user(request, session_factory, settings)
+    def current_principal(request: Request) -> auth_mod.Principal:
+        return auth_mod.resolve_principal(request, session_factory, settings)
 
     @app.exception_handler(Exception)
     async def unhandled(_request, exc):  # spec §4.5: never serialize exceptions out
@@ -130,17 +132,36 @@ def create_app() -> FastAPI:
             "gemini": f"gemini ({settings.gemini_model})",
             "stub": "stub (no LLM configured)",
         }[provider]
-        return {"ok": True, "provider": provider, "llm": detail, "auth": settings.auth_enabled()}
+        return {
+            "ok": True,
+            "provider": provider,
+            "llm": detail,
+            "auth": settings.auth_enabled(),
+            "anon_trial": settings.anon_trial_active(),
+        }
 
     @app.get("/api/me")
-    def me(user: User = Depends(current_user)) -> dict:
+    def me(request: Request, p: auth_mod.Principal = Depends(current_principal)) -> dict:
+        if p.is_anon:
+            quota = settings.anon_daily_analyses
+            used = auth_mod.anon_trial_used(request)
+            return {
+                "authenticated": False,
+                "is_anon": True,
+                "email": "",
+                "name": "",
+                "used": used,
+                "quota": quota,
+                "remaining": max(0, quota - used),
+            }
         with session_factory() as session:
-            used = auth_mod.analyses_used_today(session, user.id)
+            used = auth_mod.analyses_used_today(session, p.id)
         quota = settings.per_user_daily_analyses
         return {
             "authenticated": settings.auth_enabled(),
-            "email": user.email,
-            "name": user.name,
+            "is_anon": False,
+            "email": p.email,
+            "name": p.name,
             "used": used,
             "quota": quota,
             "remaining": max(0, quota - used),
@@ -148,9 +169,13 @@ def create_app() -> FastAPI:
 
     @app.get("/api/search")
     def search(
-        q: str, country: str = "us", lang: str = "en", user: User = Depends(current_user)
+        q: str,
+        request: Request,
+        country: str = "us",
+        lang: str = "en",
+        p: auth_mod.Principal = Depends(current_principal),
     ) -> list[dict]:
-        rate_limit(f"search:{user.id}")
+        rate_limit(f"search:ip:{auth_mod.client_ip(request)}" if p.is_anon else f"search:{p.id}")
         if (
             not (1 <= len(q.strip()) <= 200)
             or not LOCALE_RE.match(country)
@@ -178,17 +203,22 @@ def create_app() -> FastAPI:
         ]
 
     @app.post("/api/analyze")
-    def analyze(req: AnalyzeRequest, user: User = Depends(current_user)) -> dict:
-        rate_limit(f"analyze:{user.id}")
+    def analyze(
+        req: AnalyzeRequest,
+        request: Request,
+        p: auth_mod.Principal = Depends(current_principal),
+    ) -> dict:
+        rate_limit(f"analyze:ip:{auth_mod.client_ip(request)}" if p.is_anon else f"analyze:{p.id}")
         try:
             scraper_client.validate_app_id(req.app_id)
         except InvalidAppId as exc:
             raise HTTPException(422, "invalid app_id") from exc
         qhash = an.question_hash(req.question)
         with session_factory() as session:
-            # Serialize this user's concurrent submits (row lock) so the quota count below
-            # can't be raced past by parallel requests.
-            session.get(User, user.id, with_for_update=True)
+            # Serialize a signed-in user's concurrent submits (row lock) so the quota count
+            # can't be raced past by parallel requests. (Anon trial is cookie-counted.)
+            if not p.is_anon:
+                session.get(User, p.id, with_for_update=True)
             # Answer cache: fresh snapshot + same normalized question → no job, no LLM.
             hit = session.execute(
                 select(Analysis, Snapshot)
@@ -198,6 +228,7 @@ def create_app() -> FastAPI:
                     Analysis.country == req.country,
                     Analysis.lang == req.lang,
                     Analysis.question_hash == qhash,
+                    Analysis.period == req.period,
                     Snapshot.expires_at > worker_mod.utcnow(),
                 )
             ).first()
@@ -207,7 +238,7 @@ def create_app() -> FastAPI:
                     "job_id": None,
                     "status": "done",
                     "cache_hit": True,
-                    "result": _result_payload(record, snap),
+                    "result": _result_payload(record, snap, share=not p.is_anon),
                 }
             # Single-flight: coalesce into an identical active job.
             active = (
@@ -217,6 +248,7 @@ def create_app() -> FastAPI:
                         Job.country == req.country,
                         Job.lang == req.lang,
                         Job.question_hash == qhash,
+                        Job.period == req.period,
                         Job.status.in_(ACTIVE_STATUSES),
                     )
                 )
@@ -226,35 +258,52 @@ def create_app() -> FastAPI:
             if active is not None:
                 return {"job_id": active.id, "status": active.status, "cache_hit": False}
             # Quota is consumed only on a real cache MISS (new job). Cached re-asks are free.
-            used = auth_mod.analyses_used_today(session, user.id)
-            if used >= settings.per_user_daily_analyses:
-                raise HTTPException(
-                    429,
-                    f"daily limit reached ({settings.per_user_daily_analyses} analyses) — "
-                    "resets at UTC midnight; cached re-asks remain free",
-                )
+            if p.is_anon:
+                # Protect signed-in headroom: stop serving the free trial once the day's spend
+                # has eaten its allotted fraction of the global cap.
+                cap = settings.global_daily_spend_cap_usd
+                if worker_mod.today_spend_usd(session) >= settings.anon_spend_fraction * cap:
+                    raise HTTPException(
+                        429, "the free trial is busy right now — sign in to keep analyzing"
+                    )
+                if auth_mod.anon_trial_used(request) >= settings.anon_daily_analyses:
+                    raise HTTPException(
+                        429,
+                        f"free analysis used — sign in with Google for "
+                        f"{settings.per_user_daily_analyses} a day (free)",
+                    )
+                auth_mod.consume_anon_trial(request)
+            else:
+                used = auth_mod.analyses_used_today(session, p.id)
+                if used >= settings.per_user_daily_analyses:
+                    raise HTTPException(
+                        429,
+                        f"daily limit reached ({settings.per_user_daily_analyses} analyses) — "
+                        "resets at UTC midnight; cached re-asks remain free",
+                    )
             job = Job(
                 id=new_job_id(),
-                user_id=user.id,
+                user_id=p.id,  # "anon:<id>" for anon → binds the job to its creator's cookie
                 app_id=req.app_id,
                 country=req.country,
                 lang=req.lang,
                 question=req.question.strip(),
                 question_hash=qhash,
+                period=req.period,
             )
             session.add(job)
             session.commit()
             return {"job_id": job.id, "status": "queued", "cache_hit": False}
 
     @app.get("/api/jobs/{job_id}")
-    def job_status(job_id: str, user: User = Depends(current_user)) -> dict:
+    def job_status(job_id: str, p: auth_mod.Principal = Depends(current_principal)) -> dict:
         if not job_id.isalnum() or len(job_id) > 32:
             raise HTTPException(422, "invalid job id")
         with session_factory() as session:
             job = session.get(Job, job_id)
             if job is None:
                 raise HTTPException(404, "job not found")
-            if job.user_id is not None and job.user_id != user.id:
+            if job.user_id is not None and job.user_id != p.id:
                 raise HTTPException(404, "job not found")  # 404 (not 403) — don't confirm existence
             out: dict = {
                 "job_id": job.id,
@@ -265,7 +314,7 @@ def create_app() -> FastAPI:
             if job.status == "done" and job.analysis_id is not None:
                 record = session.get(Analysis, job.analysis_id)
                 snap = session.get(Snapshot, job.snapshot_id)
-                out["result"] = _result_payload(record, snap)
+                out["result"] = _result_payload(record, snap, share=not p.is_anon)
             return out
 
     @app.get("/api/analysis/{token}")
@@ -316,9 +365,9 @@ def create_app() -> FastAPI:
     return app
 
 
-def _result_payload(record: Analysis, snap: Snapshot) -> dict:
+def _result_payload(record: Analysis, snap: Snapshot, share: bool = True) -> dict:
     meta = snap.app_meta or {}
-    return {
+    payload = {
         "app": {
             "app_id": snap.app_id,
             "title": meta.get("title"),
@@ -338,9 +387,13 @@ def _result_payload(record: Analysis, snap: Snapshot) -> dict:
             "complete": snap.complete,
         },
         "model": record.model,
-        "share_token": record.share_token,
+        "period": record.period,
         "answer": record.answer,
     }
+    # Durable share links are a signed-in feature (a sign-in upsell for anon trial users).
+    if share:
+        payload["share_token"] = record.share_token
+    return payload
 
 
 def main() -> None:  # pragma: no cover - `pmr-serve` entrypoint

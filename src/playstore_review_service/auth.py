@@ -12,6 +12,8 @@ only created on a cache MISS, so cached re-asks are free and don't consume quota
 from __future__ import annotations
 
 import logging
+import secrets
+from dataclasses import dataclass
 from datetime import datetime
 from datetime import time as dtime
 
@@ -25,6 +27,18 @@ from .db import Job, User, utcnow
 logger = logging.getLogger(__name__)
 
 LOCAL_USER_ID = "local"
+
+
+@dataclass(frozen=True, slots=True)
+class Principal:
+    """The caller of a request: either an authenticated User or an anonymous trial visitor.
+    `id` is the job-ownership key (User.id, or "anon:<random>"); routes branch on `is_anon`."""
+
+    id: str
+    is_anon: bool
+    email: str = ""
+    name: str = ""
+    user: User | None = None
 
 
 def make_oauth(settings: Settings):
@@ -68,6 +82,59 @@ def resolve_user(request: Request, session_factory: sessionmaker, settings: Sett
             user = upsert_user(session, LOCAL_USER_ID, "local@localhost", "Local Dev")
             request.session["user_id"] = LOCAL_USER_ID
             return user
+    raise HTTPException(401, "auth_required")
+
+
+def client_ip(request: Request) -> str:
+    """Real client IP. uvicorn runs with --proxy-headers + FORWARDED_ALLOW_IPS, so
+    request.client is already rewritten from the trusted proxy's X-Forwarded-For. Used only
+    as an in-memory rate-limit key for anonymous traffic — never persisted."""
+    return request.client.host if request.client else "unknown"
+
+
+def _anon_id(request: Request) -> str:
+    """Stable random id for this browser, minted into the signed session cookie."""
+    aid = request.session.get("anon_id")
+    if not aid:
+        aid = secrets.token_hex(16)
+        request.session["anon_id"] = aid
+    return aid
+
+
+def anon_trial_used(request: Request) -> int:
+    """Trial analyses this browser has spent today (counter in the signed session cookie)."""
+    if request.session.get("anon_day") != utcnow().date().isoformat():
+        return 0
+    return int(request.session.get("anon_count", 0))
+
+
+def consume_anon_trial(request: Request) -> None:
+    """Increment today's per-browser trial counter (resets on a new UTC day)."""
+    today = utcnow().date().isoformat()
+    if request.session.get("anon_day") != today:
+        request.session["anon_day"] = today
+        request.session["anon_count"] = 0
+    request.session["anon_count"] = int(request.session.get("anon_count", 0)) + 1
+
+
+def resolve_principal(
+    request: Request, session_factory: sessionmaker, settings: Settings
+) -> Principal:
+    """Authenticated User → Principal(is_anon=False). When auth is off (local dev), the local
+    user. When auth is on but there's no session: an anonymous Principal if the trial is active,
+    else 401. The signed-in/local resolution is identical to resolve_user (unchanged behavior)."""
+    uid = request.session.get("user_id")
+    with session_factory() as session:
+        if uid:
+            user = session.get(User, uid)
+            if user is not None:
+                return Principal(user.id, False, user.email, user.name, user)
+        if not settings.auth_enabled():
+            user = upsert_user(session, LOCAL_USER_ID, "local@localhost", "Local Dev")
+            request.session["user_id"] = LOCAL_USER_ID
+            return Principal(user.id, False, user.email, user.name, user)
+    if settings.anon_trial_active():
+        return Principal(f"anon:{_anon_id(request)}", True)
     raise HTTPException(401, "auth_required")
 
 
