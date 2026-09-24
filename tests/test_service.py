@@ -6,6 +6,7 @@ No network, no LLM key (stub analyzer path), tmp-file SQLite per test session.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,15 +22,17 @@ APP_ID = "com.example.calc"
 
 
 def _fake_reviews(n: int = 30) -> list[Review]:
+    base = datetime.now(UTC)
     out = []
     for i in range(n):
         score = (i % 5) + 1
+        dt = (base - timedelta(days=(i % 10) + 1)).strftime("%Y-%m-%dT10:00:00")
         out.append(
             Review(
                 review_id=f"r{i}",
                 score=score,
                 text=("keeps crashing constantly" if score <= 2 else "love the clean design"),
-                created_at=f"2026-05-{(i % 28) + 1:02d}T10:00:00",
+                created_at=dt,
                 app_version="4.3.1",
                 thumbs_up=i,
             )
