@@ -107,7 +107,7 @@ LLM_BASE_URL=https://api.sarvam.ai/v2
 LLM_API_KEY=sk_...
 LLM_COMPARTMENT_ID=
 LLM_CHEAP_MODEL=deepseekv4-flash
-LLM_PLANNER_MODEL=glm5.3
+LLM_PLANNER_MODEL=deepseekv4-flash
 ```
 
 - `src/playstore_review_service/config.py`: loads settings and checks provider.

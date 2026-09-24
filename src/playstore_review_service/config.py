@@ -97,7 +97,7 @@ def get_settings() -> Settings:
             "LLM_CHEAP_MODEL",
             os.environ.get("LLM_MODEL", "deepseekv4-flash"),
         ),
-        llm_planner_model=os.environ.get("LLM_PLANNER_MODEL", "glm5.3"),
+        llm_planner_model=os.environ.get("LLM_PLANNER_MODEL", "deepseekv4-flash"),
         google_client_id=os.environ.get("GOOGLE_CLIENT_ID", ""),
         google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET", ""),
         google_redirect_uri=os.environ.get("GOOGLE_REDIRECT_URI", ""),
