@@ -309,6 +309,52 @@ def test_openai_compatible_provider_used_when_configured(service, monkeypatch):
     config_mod.get_settings.cache_clear()
 
 
+def test_sarvam_provider_used_when_configured(service, monkeypatch):
+    client, sf = service
+    monkeypatch.setenv("LLM_PROVIDER", "sarvam")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.sarvam.ai/v2")
+    monkeypatch.setenv("LLM_API_KEY", "sarvam-key-test")
+    monkeypatch.setenv("LLM_CHEAP_MODEL", "deepseekv4-flash")
+    config_mod.get_settings.cache_clear()
+
+    import playstore_review_service.worker as worker_mod
+
+    calls: dict = {}
+
+    def fake_sarvam(question, lines, *, base_url, api_key, compartment_id="", model, **kw):
+        calls["model"] = model
+        calls["base_url"] = base_url
+        calls["api_key"] = api_key
+        calls["compartment_id"] = compartment_id
+        return (
+            {
+                "summary": "Sarvam DeepSeek: crashes reported.",
+                "not_enough_data": False,
+                "themes": [],
+                "supporting_quotes": [
+                    {"id": "r0", "quote": "keeps crashing constantly", "stars": 1},
+                ],
+                "caveats": [],
+            },
+            {"tokens_in": 150, "tokens_out": 30},
+        )
+
+    monkeypatch.setattr(worker_mod.llm_openai, "openai_compatible_analyze", fake_sarvam)
+
+    body = client.post("/api/analyze", json={"app_id": APP_ID, "question": "crashes?"}).json()
+    process_one(sf)
+    out = client.get(f"/api/jobs/{body['job_id']}").json()
+
+    assert out["status"] == "done"
+    assert calls["model"] == "deepseekv4-flash"
+    assert calls["base_url"] == "https://api.sarvam.ai/v2"
+    assert calls["api_key"] == "sarvam-key-test"
+    assert calls["compartment_id"] == ""
+    assert out["result"]["model"] == "deepseekv4-flash"
+    assert out["result"]["answer"]["summary"].startswith("Sarvam DeepSeek")
+    config_mod.get_settings.cache_clear()
+
+
 def test_usage_log_records_stub_event(service):
     client, sf = service
     client.post("/api/analyze", json={"app_id": APP_ID, "question": "log this run?"})

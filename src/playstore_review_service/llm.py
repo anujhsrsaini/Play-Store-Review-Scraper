@@ -26,6 +26,11 @@ MODEL_PRICES = {
     "xai.grok-3-mini": (0.30, 0.50),
     "xai.grok-3": (3.00, 15.00),
     "xai.grok-4": (3.00, 15.00),
+    # Sarvam AI v2 (converted from INR: ~87 INR/USD)
+    "deepseekv4-flash": (0.25, 0.70),
+    "gemma4": (0.45, 1.10),
+    "sarvam-105b": (0.35, 0.90),
+    "glm5.3": (1.50, 4.60),
 }
 DEFAULT_PRICE = (1.00, 5.00)  # unknown models estimate conservatively (cap is a safety net)
 MAX_OUTPUT_TOKENS = 2048
@@ -100,7 +105,9 @@ def extract_json(text: str) -> dict[str, Any]:
     Gateways that don't honor structured-output (spec §4.3 / OCI note) return JSON as text,
     sometimes fenced. Raises LLMError (type-name only) on failure — never echoes the payload.
     """
-    s = text.strip()
+    if not text or not isinstance(text, str):
+        raise LLMError("llm response content is empty")
+    s = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
     if s.startswith("```"):
         s = re.sub(r"^```[a-zA-Z]*\n?", "", s)
         s = re.sub(r"\n?```$", "", s.strip())

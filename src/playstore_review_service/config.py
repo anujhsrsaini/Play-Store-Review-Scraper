@@ -69,9 +69,13 @@ class Settings:
         return self.auth_enabled() and self.anon_trial_enabled
 
     def provider(self) -> str:
-        """Resolve the active LLM provider. Order: explicit OpenAI-compatible (OCI) →
+        """Resolve the active LLM provider. Order: explicit OpenAI-compatible (Sarvam/OCI) →
         legacy Gemini key → no-LLM stub (always works for local testing)."""
-        if self.llm_provider == "openai_compatible" and self.llm_api_key and self.llm_base_url:
+        if (
+            self.llm_provider in ("openai_compatible", "sarvam")
+            and self.llm_api_key
+            and self.llm_base_url
+        ):
             return "openai_compatible"
         if self.gemini_api_key:
             return "gemini"
@@ -89,8 +93,11 @@ def get_settings() -> Settings:
         llm_base_url=os.environ.get("LLM_BASE_URL", ""),
         llm_api_key=os.environ.get("LLM_API_KEY", ""),
         llm_compartment_id=os.environ.get("LLM_COMPARTMENT_ID", ""),
-        llm_model=os.environ.get("LLM_CHEAP_MODEL", "xai.grok-3-mini"),
-        llm_planner_model=os.environ.get("LLM_PLANNER_MODEL", "xai.grok-4"),
+        llm_model=os.environ.get(
+            "LLM_CHEAP_MODEL",
+            os.environ.get("LLM_MODEL", "deepseekv4-flash"),
+        ),
+        llm_planner_model=os.environ.get("LLM_PLANNER_MODEL", "glm5.3"),
         google_client_id=os.environ.get("GOOGLE_CLIENT_ID", ""),
         google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET", ""),
         google_redirect_uri=os.environ.get("GOOGLE_REDIRECT_URI", ""),

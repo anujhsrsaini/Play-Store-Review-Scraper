@@ -35,10 +35,10 @@ logger = logging.getLogger(__name__)
 # need a much larger read budget (see OCI doc) — not used on this sync analysis path.
 DEFAULT_TIMEOUT: tuple[int, int] = (10, 120)
 TEMPERATURE = 0.15
-# Reasoning models (e.g. xai.grok-3-mini) spend completion budget on hidden reasoning
-# tokens BEFORE emitting the answer, so the JSON output needs generous headroom or it
-# truncates mid-object. Larger than the Gemini cap for this reason.
-OCI_MAX_TOKENS = 6000
+# Reasoning models (e.g. xai.grok-3-mini, deepseekv4-flash, sarvam-105b) spend completion budget
+# on hidden reasoning tokens BEFORE emitting the answer, so the JSON output needs generous headroom.
+DEFAULT_MAX_TOKENS = 6000
+OCI_MAX_TOKENS = DEFAULT_MAX_TOKENS  # backwards compatibility alias
 USD_PER_TICK = 1e-11  # OCI `cost_in_usd_ticks` → USD (empirically derived; see usage parse)
 
 PostFn = Callable[..., Any]
@@ -56,7 +56,7 @@ def openai_compatible_analyze(
     *,
     base_url: str,
     api_key: str,
-    compartment_id: str,
+    compartment_id: str = "",
     model: str,
     timeout: tuple[int, int] = DEFAULT_TIMEOUT,
     post: PostFn = _default_post,
@@ -69,7 +69,7 @@ def openai_compatible_analyze(
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    if compartment_id:  # required by OCI; harmless for other OpenAI-compatible gateways
+    if compartment_id:  # required by OCI; omitted for standard gateways like Sarvam
         headers["CompartmentId"] = compartment_id
 
     messages = [
@@ -82,7 +82,7 @@ def openai_compatible_analyze(
             "model": model,
             "messages": msgs,
             "temperature": TEMPERATURE,
-            "max_tokens": OCI_MAX_TOKENS,
+            "max_tokens": DEFAULT_MAX_TOKENS,
         }
         try:
             resp = post(
@@ -93,9 +93,19 @@ def openai_compatible_analyze(
             )
             resp.raise_for_status()
             data = resp.json()
-            content = data["choices"][0]["message"]["content"]
+            msg = data["choices"][0]["message"]
+            content = (msg.get("content") or "").strip()
+            if not content:
+                # In reasoning models, if content is empty (token limit), check reasoning
+                reasoning = (msg.get("reasoning") or msg.get("reasoning_content") or "").strip()
+                if reasoning and "{" in reasoning and "}" in reasoning:
+                    content = reasoning
+                else:
+                    raise LLMError("llm response missing content (token budget exhausted)")
         except KeyError as exc:
             raise LLMError("llm response missing choices/message") from exc
+        except LLMError:
+            raise
         except Exception as exc:
             # type-name only — never leak the API key (in the headers) or payload
             raise LLMError(f"openai-compatible call failed: {type(exc).__name__}") from exc

@@ -25,9 +25,11 @@ Copy `env.example` → `.env` and fill in. Required for prod:
 
 ```
 LLM_PROVIDER=openai_compatible
-LLM_BASE_URL=https://inference.generativeai.us-ashburn-1.oci.oraclecloud.com/openai/v1
-LLM_API_KEY=...                  # OCI GenAI key
-LLM_COMPARTMENT_ID=ocid1...
+LLM_BASE_URL=https://api.sarvam.ai/v2
+LLM_API_KEY=...                  # Sarvam AI API key
+LLM_COMPARTMENT_ID=              # leave empty for Sarvam
+LLM_CHEAP_MODEL=deepseekv4-flash
+LLM_PLANNER_MODEL=glm5.3
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=https://<your-subdomain>/auth/callback

@@ -10,7 +10,7 @@ import json
 import pytest
 
 from playstore_review_service.config import Settings
-from playstore_review_service.llm import LLMError
+from playstore_review_service.llm import LLMError, cost_usd
 from playstore_review_service.llm_openai import openai_compatible_analyze
 
 BASE = "https://inference.generativeai.us-ashburn-1.oci.oraclecloud.com/openai/v1"
@@ -230,8 +230,98 @@ def test_provider_resolves_openai_compatible():
     assert s.provider() == "openai_compatible"
 
 
+def test_provider_resolves_sarvam_alias():
+    s = _settings(
+        llm_provider="sarvam",
+        llm_api_key="fake-token",
+        llm_base_url="https://api.sarvam.ai/v2",
+    )
+    assert s.provider() == "openai_compatible"
+
+
 def test_provider_falls_back_to_gemini_then_stub():
     assert _settings(gemini_api_key="g-key").provider() == "gemini"
     assert _settings().provider() == "stub"
     # openai_compatible declared but key missing -> not selected
     assert _settings(llm_provider="openai_compatible", llm_base_url=BASE).provider() == "stub"
+
+
+# ---------------------------------------------------------- Sarvam AI tests
+
+
+def test_sarvam_response_with_reasoning_content():
+    resp = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps(ANSWER),
+                    "reasoning_content": "Detailed thinking about review r1 and crashes...",
+                }
+            }
+        ],
+        "usage": {"prompt_tokens": 500, "completion_tokens": 120},
+    }
+    post = _capturing_post({}, _Resp(resp))
+    payload, usage = openai_compatible_analyze(
+        "q",
+        "l",
+        base_url="https://api.sarvam.ai/v2",
+        api_key="fake-sarvam-key",
+        model="deepseekv4-flash",
+        post=post,
+    )
+    assert payload["summary"].startswith("Users mostly")
+    assert usage["tokens_in"] == 500
+    assert usage["tokens_out"] == 120
+    assert usage["cost_usd"] is None
+
+
+def test_sarvam_response_with_think_tags_in_content():
+    content = f"<think>\nAnalyzing negative sentiment.\n</think>\n{json.dumps(ANSWER)}"
+    resp = {
+        "choices": [{"message": {"role": "assistant", "content": content}}],
+        "usage": {"prompt_tokens": 300, "completion_tokens": 80},
+    }
+    post = _capturing_post({}, _Resp(resp))
+    payload, _ = openai_compatible_analyze(
+        "q",
+        "l",
+        base_url="https://api.sarvam.ai/v2",
+        api_key="fake-sarvam-key",
+        model="deepseekv4-flash",
+        post=post,
+    )
+    assert payload["summary"].startswith("Users mostly")
+
+
+def test_sarvam_empty_content_triggers_llmerror():
+    # Model ran out of completion tokens during reasoning
+    resp = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "reasoning_content": "Incomplete thought...",
+                }
+            }
+        ]
+    }
+    post = _capturing_post({}, _Resp(resp))
+    with pytest.raises(LLMError):
+        openai_compatible_analyze(
+            "q",
+            "l",
+            base_url="https://api.sarvam.ai/v2",
+            api_key="fake-sarvam-key",
+            model="deepseekv4-flash",
+            post=post,
+        )
+
+
+def test_sarvam_pricing_registered():
+    assert cost_usd("deepseekv4-flash", 1_000_000, 1_000_000) == pytest.approx(0.95)
+    assert cost_usd("gemma4", 1_000_000, 1_000_000) == pytest.approx(1.55)
+    assert cost_usd("sarvam-105b", 1_000_000, 1_000_000) == pytest.approx(1.25)
+    assert cost_usd("glm5.3", 1_000_000, 1_000_000) == pytest.approx(6.10)

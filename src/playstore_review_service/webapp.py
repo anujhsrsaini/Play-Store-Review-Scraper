@@ -128,7 +128,7 @@ def create_app() -> FastAPI:
     def health() -> dict:
         provider = settings.provider()
         detail = {
-            "openai_compatible": f"OCI/OpenAI-compatible ({settings.llm_model})",
+            "openai_compatible": f"OpenAI-compatible ({settings.llm_model})",
             "gemini": f"gemini ({settings.gemini_model})",
             "stub": "stub (no LLM configured)",
         }[provider]
