@@ -61,6 +61,12 @@ class Settings:
     scrape_delay_seconds: float
     dev_inprocess_worker: bool
     scraper_proxy_url: str = ""
+    dodo_payments_api_key: str = ""
+    dodo_payments_webhook_secret: str = ""
+    dodo_payments_environment: str = "test_mode"
+    dodo_product_id_starter: str = ""
+    dodo_product_id_pass: str = ""
+    dodo_product_id_pro: str = ""
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_price_starter: str = ""
@@ -118,6 +124,12 @@ def get_settings() -> Settings:
         scrape_delay_seconds=float(os.environ.get("SCRAPE_DELAY_SECONDS", "1.0")),
         dev_inprocess_worker=os.environ.get("DEV_INPROCESS_WORKER", "1") == "1",
         scraper_proxy_url=os.environ.get("SCRAPER_PROXY_URL", ""),
+        dodo_payments_api_key=os.environ.get("DODO_PAYMENTS_API_KEY", ""),
+        dodo_payments_webhook_secret=os.environ.get("DODO_PAYMENTS_WEBHOOK_SECRET", ""),
+        dodo_payments_environment=os.environ.get("DODO_PAYMENTS_ENVIRONMENT", "test_mode"),
+        dodo_product_id_starter=os.environ.get("DODO_PRODUCT_ID_STARTER", ""),
+        dodo_product_id_pass=os.environ.get("DODO_PRODUCT_ID_PASS", ""),
+        dodo_product_id_pro=os.environ.get("DODO_PRODUCT_ID_PRO", ""),
         stripe_secret_key=os.environ.get("STRIPE_SECRET_KEY", ""),
         stripe_webhook_secret=os.environ.get("STRIPE_WEBHOOK_SECRET", ""),
         stripe_price_starter=os.environ.get("STRIPE_PRICE_STARTER", ""),

@@ -22,6 +22,8 @@ dependencies = [
   "authlib>=1.3",  # Google OAuth
   "itsdangerous>=2.0",  # signed session cookies (Starlette SessionMiddleware)
   "stripe>=10.0",  # Self-serve checkout & webhooks
+  "dodopayments>=1.117.0",  # Dodo Payments (Merchant of Record) SDK
+  "standardwebhooks>=1.0.0",  # Standard Webhooks signature verification
 ]
 
 [project.optional-dependencies]

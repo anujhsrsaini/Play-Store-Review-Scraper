@@ -406,6 +406,7 @@ def create_app() -> FastAPI:
                 sig_header=sig_header,
                 session_factory=session_factory,
                 settings=settings,
+                headers=dict(request.headers),
             )
             return res
         except ValueError as exc:
