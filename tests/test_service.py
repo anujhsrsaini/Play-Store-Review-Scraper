@@ -6,7 +6,12 @@ No network, no LLM key (stub analyzer path), tmp-file SQLite per test session.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+try:
+    from datetime import UTC
+except ImportError:
+    UTC = timezone.utc  # noqa: UP017
 
 import pytest
 from fastapi.testclient import TestClient

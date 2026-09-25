@@ -51,7 +51,8 @@ def question_hash(question: str) -> str:
 
 
 def normalize_text(text: str) -> str:
-    return re.sub(r"\s+", " ", text.strip().lower())
+    cleaned = text.replace("[", "(").replace("]", ")")
+    return re.sub(r"\s+", " ", cleaned.strip().lower())
 
 
 def star_sentiment(scores: Iterable[int | None]) -> dict[str, Any]:
@@ -212,7 +213,8 @@ def format_review_lines(curated: list[Mapping[str, Any]]) -> str:
     delimiter look-alikes are stripped so review text cannot forge prompt boundaries."""
     lines = []
     for r in curated:
-        text = _DELIMITER_RE.sub(" ", (r.get("text") or "").replace("\n", " ")).strip()
+        raw_text = (r.get("text") or "").replace("\n", " ").replace("[", "(").replace("]", ")")
+        text = _DELIMITER_RE.sub(" ", raw_text).strip()
         date = (r.get("created_at") or "")[:10] or "?"
         version = r.get("app_version") or "?"
         lines.append(

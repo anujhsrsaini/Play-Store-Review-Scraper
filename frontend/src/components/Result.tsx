@@ -1,4 +1,4 @@
-import { Check, Info, Link2, MessageSquarePlus, Star } from "lucide-react";
+import { Check, FileText, Info, Link2, MessageSquarePlus, Star } from "lucide-react";
 import { useState } from "react";
 import type { AnalysisResult, Theme } from "@/lib/api";
 import { Badge, Button, Card } from "./ui";
@@ -34,7 +34,8 @@ export function Result({
             <span className="hidden sm:inline">· {model}</span>
           </div>
         </div>
-        <div className="ml-auto flex shrink-0 gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <CopyMarkdownButton result={result} />
           {share_token && <ShareButton token={share_token} />}
           {onAskAnother && (
             <Button variant="ghost" size="sm" onClick={onAskAnother}>
@@ -274,3 +275,41 @@ function ShareButton({ token }: { token: string }) {
     </Button>
   );
 }
+
+function CopyMarkdownButton({ result }: { result: AnalysisResult }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    const { app, answer } = result;
+    const md = [
+      `# Review Lens Report: ${app.title ?? app.app_id}`,
+      `**Rating:** ${app.score != null ? app.score.toFixed(2) : "N/A"} ★ | **Analyzed Reviews:** ${result.snapshot.review_count}`,
+      "",
+      `## Summary`,
+      answer.summary,
+      "",
+      `## Top Themes`,
+      ...answer.themes.map((t) => `- **[${t.polarity.toUpperCase()}] ${t.label}** (${t.prevalence})`),
+      "",
+      `## Verified User Evidence`,
+      ...answer.supporting_quotes.map((q) => `> "${q.quote}"\n> — ★${q.stars ?? "?"} (${q.date ?? "Unknown"})`),
+      "",
+      `*Generated with Review Lens (https://reviewlens.app)*`,
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(md);
+    } catch {
+      window.prompt("Copy this markdown report:", md);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  };
+
+  return (
+    <Button variant="outline" size="sm" onClick={onCopy} title="Copy executive summary as Markdown">
+      {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <FileText className="h-4 w-4" />}
+      {copied ? "Copied MD" : "Copy MD"}
+    </Button>
+  );
+}
+

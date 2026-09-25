@@ -96,13 +96,24 @@ auto-TLS on the owner's subdomain. Closed pro audience → light gating, not ful
 
 | Task | 内容 | DoD | Depends | Status |
 |------|------|-----|---------|--------|
-| 6.1 | **API enrichment**: surface app `icon` + `histogram` in search/result; add shareable analysis permalink (`GET /api/analysis/{id}`). `[tdd:required]` | Tests: icon+histogram in payloads; permalink returns a cached analysis | 2.5 | cc:TODO |
+| 6.1 | **API enrichment**: surface app `icon` + `histogram` in search/result; add shareable analysis permalink (`GET /api/analysis/{id}`). `[tdd:required]` | Tests: icon+histogram in payloads; permalink returns a cached analysis | 2.5 | cc:完了 |
 | 6.2 | **Google OAuth + sessions** (Authlib): `User` table, `/auth/login|callback|logout`, `/api/me`. Auth-optional locally (no creds → local dev user), required in prod. `[tdd:required]` | Protected routes 401 w/o session when OAuth set; local fallback works; landing+health+permalink public | 1.1 | cc:完了 (auth.py; live OAuth pending owner creds) |
 | 6.3 | **Per-user daily quota** (jobs/day per user), enforced on cache-miss; `/api/me` returns remaining. Per-IP rate limit deferred (Cloudflare/Caddy at the edge). `[tdd:required]` | Tested: cache-miss consumes 1, cached re-ask is free, 429 past quota | 6.2, 2.5 | cc:完了 (edge rate-limit in 6.6) |
 | 6.4 | **Real OCI cost**: record `cost_in_usd_ticks` from the response into `usage_log` (replaces estimate). `[tdd:required]` | Test: usage row cost matches OCI-reported ticks | 2.1 | cc:TODO |
 | 6.5 | **React SPA**: landing/search/app-picker(icons)/ask(presets)/progress/result(donut+histogram+theme cards+quotes+caveats)/sign-in/quota chip/share/responsive; built to static, served by FastAPI. `[tdd:skip:frontend-spa]` | `npm run build` → FastAPI serves it; full flow works against the API | 6.1, 6.2, 6.3 | cc:完了 (Vite+React+TS+Tailwind+Recharts; served + SPA-route tested) |
 | 6.6 | **Deploy scaffold**: multi-stage Dockerfile (node build → python runtime) + docker-compose (web + worker + Postgres + Caddy auto-TLS); env wiring; GitHub Actions build/test gate. `[tdd:skip:deploy-config]` | `docker compose up` runs the stack; CI green on push | 6.5 | cc:完了 (Dockerfile+compose+Caddy+CI+LICENSE+DEPLOY.md; image built+booted, compose validated) |
 | 6.7 | **Owner setup (handoff)**: Google OAuth client + redirect URI; subdomain DNS → Ampere IP; OCI budget cap/alert. `[tdd:skip:owner-config]` | Documented checklist; values supplied to deploy | - | cc:完了 (DEPLOY.md checklist; OAuth creds added; awaiting DNS + OCI budget) |
+
+---
+
+## Phase 7: Monetization & Competitive Intelligence Engine
+
+| Task | 内容 | DoD | Depends | Status |
+|------|------|-----|---------|--------|
+| 7.1 | **Stripe self-serve billing & paid tier quotas**: `User` tier/stripe fields, `billing.py` checkout & webhook handling, `/api/billing/checkout` & `/api/billing/webhook`, quota tier scaling (50 for starter, 200 for pro, +20 for pass). `[tdd:required]` | Unit tests in `test_billing.py` pass; mock activate works without secrets | 6.2 | cc:完了 |
+| 7.2 | **Battle Lens (Competitor Comparison Engine)**: Multi-app comparative schema, comparative prompt, and multi-corpus quote verification. `[tdd:required]` | Architectural spec complete; API contract and prompt isolation designed | 2.1, 1.3 | cc:WIP |
+| 7.3 | **1-Click Executive Exports**: Markdown/Notion export in result header; PDF export engine. `[tdd:skip:frontend]` | Markdown copy button live on results screen | 6.5 | cc:完了 |
+| 7.4 | **Outreach Campaign & 10-Lead Intelligence Deck**: Actionable lead sheet for 10 high-value apps across 5 categories with customized Trojan Horse scripts. `[tdd:skip:docs-only]` | 10 pre-audited leads and ready-to-send messages documented | - | cc:完了 |
 
 ---
 

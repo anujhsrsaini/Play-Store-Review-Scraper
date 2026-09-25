@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -23,6 +23,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import analysis as an
 from . import auth as auth_mod
+from . import billing as billing_mod
 from . import worker as worker_mod
 from .config import DEFAULT_SESSION_SECRET, get_settings
 from .db import (
@@ -150,21 +151,34 @@ def create_app() -> FastAPI:
                 "is_anon": True,
                 "email": "",
                 "name": "",
+                "tier": "free",
+                "is_paid": False,
+                "extra_credits": 0,
                 "used": used,
                 "quota": quota,
                 "remaining": max(0, quota - used),
             }
         with session_factory() as session:
             used = auth_mod.analyses_used_today(session, p.id)
+            user = session.get(User, p.id)
+            tier = user.tier if user else "free"
+            extra_credits = user.extra_credits if user else 0
         quota = settings.per_user_daily_analyses
+        if tier == "starter":
+            quota = 50
+        elif tier == "pro":
+            quota = 200
         return {
             "authenticated": settings.auth_enabled(),
             "is_anon": False,
             "email": p.email,
             "name": p.name,
+            "tier": tier,
+            "is_paid": tier in ("starter", "pro") or extra_credits > 0,
+            "extra_credits": extra_credits,
             "used": used,
             "quota": quota,
-            "remaining": max(0, quota - used),
+            "remaining": max(0, quota - used) + extra_credits,
         }
 
     @app.get("/api/search")
@@ -274,13 +288,23 @@ def create_app() -> FastAPI:
                     )
                 auth_mod.consume_anon_trial(request)
             else:
+                user = session.get(User, p.id)
+                tier = user.tier if user else "free"
+                quota = settings.per_user_daily_analyses
+                if tier == "starter":
+                    quota = 50
+                elif tier == "pro":
+                    quota = 200
                 used = auth_mod.analyses_used_today(session, p.id)
-                if used >= settings.per_user_daily_analyses:
-                    raise HTTPException(
-                        429,
-                        f"daily limit reached ({settings.per_user_daily_analyses} analyses) — "
-                        "resets at UTC midnight; cached re-asks remain free",
-                    )
+                if used >= quota:
+                    if user and user.extra_credits > 0:
+                        user.extra_credits -= 1
+                    else:
+                        raise HTTPException(
+                            429,
+                            f"daily limit reached ({quota} analyses) — "
+                            "resets at UTC midnight; upgrade for higher limits",
+                        )
             job = Job(
                 id=new_job_id(),
                 user_id=p.id,  # "anon:<id>" for anon → binds the job to its creator's cookie
@@ -334,6 +358,58 @@ def create_app() -> FastAPI:
                 raise HTTPException(404, "analysis not found")
             snap = session.get(Snapshot, record.snapshot_id)
             return _result_payload(record, snap)
+
+    @app.get("/api/billing/checkout")
+    def billing_checkout(
+        request: Request,
+        plan: str = "starter",
+        p: auth_mod.Principal = Depends(current_principal),
+    ):
+        base_url = str(request.base_url).rstrip("/")
+        if p.is_anon:
+            return RedirectResponse(url=f"/auth/login?next=/api/billing/checkout?plan={plan}")
+        checkout_url = billing_mod.create_checkout_session(
+            user_id=p.id,
+            email=p.email,
+            plan=plan,
+            settings=settings,
+            base_url=base_url,
+        )
+        return RedirectResponse(url=checkout_url)
+
+    @app.get("/api/billing/mock-activate")
+    def billing_mock_activate(
+        plan: str = "starter",
+        user_id: str = "local",
+        p: auth_mod.Principal = Depends(current_principal),
+    ):
+        uid = p.id if not p.is_anon else user_id
+        with session_factory() as session:
+            user = session.get(User, uid)
+            if user is None:
+                user = auth_mod.upsert_user(session, uid, "local@localhost", "Local User")
+            if plan in ("starter", "pro"):
+                user.tier = plan
+                user.subscription_status = "active"
+            elif plan == "pass":
+                user.extra_credits += 20
+            session.commit()
+        return RedirectResponse(url=f"/?checkout=success&plan={plan}")
+
+    @app.post("/api/billing/webhook")
+    async def billing_webhook(request: Request):
+        payload = await request.body()
+        sig_header = request.headers.get("stripe-signature")
+        try:
+            res = billing_mod.handle_webhook_event(
+                payload=payload,
+                sig_header=sig_header,
+                session_factory=session_factory,
+                settings=settings,
+            )
+            return res
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     # Serve the built React SPA when present (built via `frontend && npm run build`);
     # otherwise fall back to the legacy single-file UI. The catch-all returns index.html

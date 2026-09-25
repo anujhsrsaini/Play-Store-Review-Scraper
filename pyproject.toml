@@ -21,6 +21,7 @@ dependencies = [
   "requests>=2.32",  # OpenAI-compatible (OCI GenAI) provider path
   "authlib>=1.3",  # Google OAuth
   "itsdangerous>=2.0",  # signed session cookies (Starlette SessionMiddleware)
+  "stripe>=10.0",  # Self-serve checkout & webhooks
 ]
 
 [project.optional-dependencies]

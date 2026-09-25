@@ -10,7 +10,12 @@ anonymization is structural at the persistence layer, not a flag.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+
+try:
+    from datetime import UTC
+except ImportError:
+    UTC = timezone.utc  # noqa: UP017
 
 from sqlalchemy import (
     JSON,
@@ -18,6 +23,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -50,6 +56,11 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)  # OAuth sub, or "local"
     email: Mapped[str] = mapped_column(String(320), index=True, default="")
     name: Mapped[str] = mapped_column(String(200), default="")
+    tier: Mapped[str] = mapped_column(String(16), default="free")  # free | starter | pro
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    subscription_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    paid_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    extra_credits: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -88,6 +99,7 @@ class CachedReview(Base):
 
 class Job(Base):
     __tablename__ = "jobs"
+    __table_args__ = (Index("idx_jobs_status_created_at", "status", "created_at"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_job_id)
     user_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
@@ -125,7 +137,7 @@ class Analysis(Base):
     lang: Mapped[str] = mapped_column(String(8))
     question_hash: Mapped[str] = mapped_column(String(64), index=True)
     period: Mapped[str] = mapped_column(String(8), default="90d")
-    snapshot_id: Mapped[int] = mapped_column(ForeignKey("review_snapshots.id"))
+    snapshot_id: Mapped[int] = mapped_column(ForeignKey("review_snapshots.id"), index=True)
     answer: Mapped[dict] = mapped_column(JSON)
     model: Mapped[str] = mapped_column(String(64), default="stub")
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)

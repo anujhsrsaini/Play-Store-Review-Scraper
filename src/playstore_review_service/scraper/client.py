@@ -34,6 +34,7 @@ event loop.
 from __future__ import annotations
 
 import logging
+import os
 import random
 import re
 import time
@@ -245,6 +246,13 @@ def _gps():
     import ssl
 
     ssl._create_default_https_context = ssl.create_default_context
+    proxy_url = os.environ.get("SCRAPER_PROXY_URL", "").strip()
+    if proxy_url:
+        import urllib.request
+
+        proxy_handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+        opener = urllib.request.build_opener(proxy_handler)
+        urllib.request.install_opener(opener)
     return gps
 
 

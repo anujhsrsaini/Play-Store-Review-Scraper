@@ -69,18 +69,63 @@ export function Home({ me, authEnabled, onUsed }: { me: Me | null; authEnabled: 
             isAnon ? (
               <SignInUpsell variant="gate" app={app} question={last?.question} period={last?.period} />
             ) : (
-              <Card className="p-4 text-sm text-slate-300">
-                <p>
-                  You've used all {me?.quota} analyses for today — resets at UTC midnight. Opening a
-                  previously analyzed question is still free.
-                </p>
-                <p className="mt-2 text-slate-400">Drop an email if you're interested in more credits.</p>
-                <a
-                  href={CONTACT_MAILTO}
-                  className="mt-3 inline-flex h-9 items-center gap-2 rounded-xl bg-brand-grad px-4 text-sm font-medium text-white shadow-glow-sm transition hover:shadow-glow hover:brightness-110"
-                >
-                  <Mail className="h-4 w-4" /> Contact us
-                </a>
+              <Card className="p-5 text-sm text-slate-300">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <div>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/20 bg-amber-400/10 px-2.5 py-0.5 text-xs font-medium text-amber-300 mb-1.5">
+                      Daily free limit reached ({me?.quota}/{me?.quota})
+                    </span>
+                    <h3 className="text-base font-semibold text-white">Unlock unlimited questions & deep analysis</h3>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Resets at UTC midnight, or upgrade to Indie Pro for high limits, competitor comparisons, and executive exports.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-indigo-400/30 bg-white/[0.04] p-3.5 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-white text-sm">Indie Pro</span>
+                        <span className="text-sm font-bold text-gradient">$19/mo</span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+                        150 analyses/mo, competitor diffing, CSV/Markdown export & priority queue.
+                      </p>
+                    </div>
+                    <a
+                      href="/api/billing/checkout?plan=starter"
+                      className="mt-3 inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-brand-grad px-3 text-xs font-medium text-white shadow-glow-sm transition hover:shadow-glow hover:brightness-110"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" /> Upgrade to Pro
+                    </a>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3.5 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-white text-sm">Indie Pass (One-Time)</span>
+                        <span className="text-sm font-bold text-slate-200">$15 once</span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+                        20 deep analyses + full PDF exports. Valid for 6 months, zero commitment.
+                      </p>
+                    </div>
+                    <a
+                      href="/api/billing/checkout?plan=pass"
+                      className="mt-3 inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-medium text-slate-200 transition hover:bg-white/10"
+                    >
+                      Get 20 Analyses
+                    </a>
+                  </div>
+                </div>
+
+                <div className="mt-3.5 pt-3 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                  <span>Re-asking previously analyzed questions is always free.</span>
+                  <a href={CONTACT_MAILTO} className="hover:text-slate-400 inline-flex items-center gap-1">
+                    <Mail className="h-3 w-3" /> Need agency or custom tier?
+                  </a>
+                </div>
               </Card>
             )
           ) : (

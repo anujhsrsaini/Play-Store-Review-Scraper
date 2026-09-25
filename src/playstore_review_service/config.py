@@ -60,6 +60,11 @@ class Settings:
     global_daily_spend_cap_usd: float
     scrape_delay_seconds: float
     dev_inprocess_worker: bool
+    scraper_proxy_url: str = ""
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_starter: str = ""
+    stripe_price_pass: str = ""
 
     def auth_enabled(self) -> bool:
         return bool(self.google_client_id and self.google_client_secret)
@@ -112,4 +117,9 @@ def get_settings() -> Settings:
         global_daily_spend_cap_usd=float(os.environ.get("GLOBAL_DAILY_SPEND_CAP_USD", "5")),
         scrape_delay_seconds=float(os.environ.get("SCRAPE_DELAY_SECONDS", "1.0")),
         dev_inprocess_worker=os.environ.get("DEV_INPROCESS_WORKER", "1") == "1",
+        scraper_proxy_url=os.environ.get("SCRAPER_PROXY_URL", ""),
+        stripe_secret_key=os.environ.get("STRIPE_SECRET_KEY", ""),
+        stripe_webhook_secret=os.environ.get("STRIPE_WEBHOOK_SECRET", ""),
+        stripe_price_starter=os.environ.get("STRIPE_PRICE_STARTER", ""),
+        stripe_price_pass=os.environ.get("STRIPE_PRICE_PASS", ""),
     )
