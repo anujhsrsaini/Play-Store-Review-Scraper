@@ -1,5 +1,6 @@
 // Site-wide constants (contact, copy) kept in one place.
 
+export const SITE_URL = "https://reviews.topfolio.in";
 export const CONTACT_EMAIL = "anuj.saini@topfolio.in";
 export const CONTACT_TOOLTIP = "Drop an email here if you're interested in more credits.";
 

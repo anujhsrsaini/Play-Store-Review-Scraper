@@ -1,6 +1,7 @@
-import { BadgeCheck, Mail, MessageSquareText, Search as SearchIcon, Sparkles } from "lucide-react";
+import { BadgeCheck, MessageSquareText, Search as SearchIcon, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { AskPanel } from "@/components/AskPanel";
+import { Pricing } from "@/components/Pricing";
 import { Progress } from "@/components/Progress";
 import { Result } from "@/components/Result";
 import { Search } from "@/components/Search";
@@ -8,7 +9,6 @@ import { SignInUpsell } from "@/components/SignInUpsell";
 import { Button, Card } from "@/components/ui";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import type { AppSummary, Me, Period } from "@/lib/api";
-import { CONTACT_MAILTO } from "@/lib/site";
 
 export function Home({ me, authEnabled, onUsed }: { me: Me | null; authEnabled: boolean; onUsed: () => void }) {
   const [app, setApp] = useState<AppSummary | null>(null);
@@ -25,7 +25,17 @@ export function Home({ me, authEnabled, onUsed }: { me: Me | null; authEnabled: 
       const raw = sessionStorage.getItem("rl_intent");
       if (!raw) return;
       sessionStorage.removeItem("rl_intent");
-      const intent = JSON.parse(raw) as { app: AppSummary; question?: string; period?: Period };
+      const intent = JSON.parse(raw) as {
+        app?: AppSummary;
+        question?: string;
+        period?: Period;
+        plan?: string;
+      };
+      if (intent.plan && (intent.plan === "starter" || intent.plan === "pass")) {
+        // Anonymous buyer signed in to check out: resume straight to checkout.
+        window.location.href = `/api/billing/checkout?plan=${intent.plan}`;
+        return;
+      }
       if (intent.app) {
         setApp(intent.app);
         setDraft({ question: intent.question, period: intent.period });
@@ -62,6 +72,15 @@ export function Home({ me, authEnabled, onUsed }: { me: Me | null; authEnabled: 
 
       {landing && <ExampleApps onPick={pick} />}
       {landing && <HowItWorks />}
+      {landing && (
+        <section aria-label="Pricing">
+          <h2 className="mb-1 text-center text-lg font-semibold text-white">Simple pricing</h2>
+          <p className="mb-3 text-center text-xs text-slate-500">
+            Start free. Upgrade when you need more.
+          </p>
+          <Pricing me={me} />
+        </section>
+      )}
 
       {app && (
         <>
@@ -70,66 +89,21 @@ export function Home({ me, authEnabled, onUsed }: { me: Me | null; authEnabled: 
               <SignInUpsell variant="gate" app={app} question={last?.question} period={last?.period} />
             ) : (
               <Card className="p-5 text-sm text-slate-300">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                  <div>
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/20 bg-amber-400/10 px-2.5 py-0.5 text-xs font-medium text-amber-300 mb-1.5">
-                      Daily free limit reached ({me?.quota}/{me?.quota})
-                    </span>
-                    <h3 className="text-base font-semibold text-white">Unlock unlimited questions & deep analysis</h3>
-                    <p className="mt-1 text-xs text-slate-400">
-                      Resets at UTC midnight, or upgrade to Indie Pro for high limits, competitor comparisons, and Markdown exports.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl border border-indigo-400/30 bg-white/[0.04] p-3.5 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-white text-sm">Indie Pro</span>
-                        <span className="text-sm font-bold text-gradient">$19/mo</span>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-                        150 analyses/mo, competitor diffing, Markdown export & priority queue.
-                      </p>
-                    </div>
-                    <a
-                      href="/api/billing/checkout?plan=starter"
-                      className="mt-3 inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-brand-grad px-3 text-xs font-medium text-white shadow-glow-sm transition hover:shadow-glow hover:brightness-110"
-                    >
-                      <Sparkles className="h-3.5 w-3.5" /> Upgrade to Pro
-                    </a>
-                  </div>
-
-                  <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3.5 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-white text-sm">Indie Pass (One-Time)</span>
-                        <span className="text-sm font-bold text-slate-200">$15 once</span>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-                        20 deep analyses + one-click Markdown exports. Valid for 6 months, zero commitment.
-                      </p>
-                    </div>
-                    <a
-                      href="/api/billing/checkout?plan=pass"
-                      className="mt-3 inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-medium text-slate-200 transition hover:bg-white/10"
-                    >
-                      Get 20 Analyses
-                    </a>
-                  </div>
-                </div>
-
-                <div className="mt-3.5 pt-3 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                  <span>Re-asking previously analyzed questions is always free.</span>
-                  <a href={CONTACT_MAILTO} className="hover:text-slate-400 inline-flex items-center gap-1">
-                    <Mail className="h-3 w-3" /> Need agency or custom tier?
-                  </a>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/20 bg-amber-400/10 px-2.5 py-0.5 text-xs font-medium text-amber-300 mb-1.5">
+                  Daily limit reached ({me?.used}/{me?.quota} used)
+                </span>
+                <h3 className="text-base font-semibold text-white">Need more analyses today?</h3>
+                <p className="mt-1 text-xs text-slate-400">
+                  Your free quota resets at UTC midnight. Upgrade for a higher daily limit.
+                </p>
+                <div className="mt-3">
+                  <Pricing me={me} />
                 </div>
               </Card>
             )
           ) : (
             <AskPanel
+              key={app.app_id}
               app={app}
               busy={state.phase === "working"}
               defaultQuestion={draft.question}

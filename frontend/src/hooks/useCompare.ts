@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, type CompareResult } from "@/lib/api";
 
 type Phase = "idle" | "working" | "done" | "error";
@@ -22,49 +22,72 @@ function errMsg(e: unknown): string {
 export function useCompare(onComplete?: () => void) {
   const [state, setState] = useState<CompareState>({ phase: "idle", progress: 0 });
   const timer = useRef<number | undefined>(undefined);
+  const mounted = useRef(true);
+  // Guards setState after unmount (jobs run for minutes; users navigate away)
+  // and skips overlapping poll ticks when a request is slower than the interval.
+  const inFlight = useRef(false);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (timer.current) window.clearInterval(timer.current);
+      timer.current = undefined;
+    };
+  }, []);
 
   const stop = () => {
     if (timer.current) window.clearInterval(timer.current);
     timer.current = undefined;
   };
 
+  const setLive = (s: CompareState) => {
+    if (mounted.current) setState(s);
+  };
+
   const reset = useCallback(() => {
     stop();
-    setState({ phase: "idle", progress: 0 });
+    inFlight.current = false;
+    setLive({ phase: "idle", progress: 0 });
   }, []);
 
   const submit = useCallback(
     async (appAId: string, appBId: string, lookbackDays = 90, customFocus = "") => {
       stop();
-      setState({ phase: "working", status: "submitting", progress: 0 });
+      inFlight.current = false;
+      setLive({ phase: "working", status: "submitting", progress: 0 });
       try {
         const r = await api.compare(appAId, appBId, lookbackDays, customFocus);
         if (r.cache_hit && r.result) {
-          setState({ phase: "done", progress: 100, result: r.result });
+          setLive({ phase: "done", progress: 100, result: r.result });
           onComplete?.();
           return;
         }
         if (!r.job_id) {
-          setState({ phase: "error", progress: 0, error: "No job was created" });
+          setLive({ phase: "error", progress: 0, error: "No job was created" });
           return;
         }
         const jobId = r.job_id;
         timer.current = window.setInterval(async () => {
+          if (inFlight.current) return; // previous tick still awaiting — skip, don't pile up
+          inFlight.current = true;
           try {
             const j = await api.compareJob(jobId);
             if (j.status === "done" && j.result) {
               stop();
-              setState({ phase: "done", progress: 100, result: j.result });
+              setLive({ phase: "done", progress: 100, result: j.result });
               onComplete?.();
             } else if (j.status === "error") {
               stop();
-              setState({ phase: "error", progress: j.progress_percent, error: j.error || "Comparison failed" });
+              setLive({ phase: "error", progress: j.progress_percent, error: j.error || "Comparison failed" });
             } else {
-              setState({ phase: "working", status: j.status, progress: j.progress_percent, detail: j.progress_detail });
+              setLive({ phase: "working", status: j.status, progress: j.progress_percent, detail: j.progress_detail });
             }
           } catch (e) {
             stop();
-            setState({ phase: "error", progress: 0, error: errMsg(e) });
+            setLive({ phase: "error", progress: 0, error: errMsg(e) });
+          } finally {
+            inFlight.current = false;
           }
         }, 1200);
       } catch (e) {
@@ -72,11 +95,11 @@ export function useCompare(onComplete?: () => void) {
         // sign-in gate (anon) or the daily-limit card (signed-in). Refresh /api/me.
         if (e instanceof ApiError && e.status === 429) {
           stop();
-          setState({ phase: "idle", progress: 0 });
+          setLive({ phase: "idle", progress: 0 });
           onComplete?.();
           return;
         }
-        setState({ phase: "error", progress: 0, error: errMsg(e) });
+        setLive({ phase: "error", progress: 0, error: errMsg(e) });
       }
     },
     [onComplete],

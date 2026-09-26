@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, type AnalysisResult, type Period } from "@/lib/api";
 
 type Phase = "idle" | "working" | "done" | "error";
@@ -21,49 +21,72 @@ function errMsg(e: unknown): string {
 export function useAnalysis(onComplete?: () => void) {
   const [state, setState] = useState<AnalysisState>({ phase: "idle", progress: 0 });
   const timer = useRef<number | undefined>(undefined);
+  const mounted = useRef(true);
+  // Guards setState after unmount (jobs run for minutes; users navigate away)
+  // and skips overlapping poll ticks when a request is slower than the interval.
+  const inFlight = useRef(false);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (timer.current) window.clearInterval(timer.current);
+      timer.current = undefined;
+    };
+  }, []);
 
   const stop = () => {
     if (timer.current) window.clearInterval(timer.current);
     timer.current = undefined;
   };
 
+  const setLive = (s: AnalysisState) => {
+    if (mounted.current) setState(s);
+  };
+
   const reset = useCallback(() => {
     stop();
-    setState({ phase: "idle", progress: 0 });
+    inFlight.current = false;
+    setLive({ phase: "idle", progress: 0 });
   }, []);
 
   const submit = useCallback(
     async (appId: string, question: string, period: Period = "90d") => {
       stop();
-      setState({ phase: "working", status: "submitting", progress: 0 });
+      inFlight.current = false;
+      setLive({ phase: "working", status: "submitting", progress: 0 });
       try {
         const r = await api.analyze(appId, question, period);
         if (r.cache_hit && r.result) {
-          setState({ phase: "done", progress: 0, result: r.result });
+          setLive({ phase: "done", progress: 0, result: r.result });
           onComplete?.();
           return;
         }
         if (!r.job_id) {
-          setState({ phase: "error", progress: 0, error: "No job was created" });
+          setLive({ phase: "error", progress: 0, error: "No job was created" });
           return;
         }
         const jobId = r.job_id;
         timer.current = window.setInterval(async () => {
+          if (inFlight.current) return; // previous tick still awaiting — skip, don't pile up
+          inFlight.current = true;
           try {
             const j = await api.job(jobId);
             if (j.status === "done" && j.result) {
               stop();
-              setState({ phase: "done", progress: j.progress, result: j.result });
+              setLive({ phase: "done", progress: j.progress, result: j.result });
               onComplete?.();
             } else if (j.status === "error") {
               stop();
-              setState({ phase: "error", progress: j.progress, error: j.error || "Analysis failed" });
+              setLive({ phase: "error", progress: j.progress, error: j.error || "Analysis failed" });
             } else {
-              setState({ phase: "working", status: j.status, progress: j.progress });
+              setLive({ phase: "working", status: j.status, progress: j.progress });
             }
           } catch (e) {
             stop();
-            setState({ phase: "error", progress: 0, error: errMsg(e) });
+            setLive({ phase: "error", progress: 0, error: errMsg(e) });
+          } finally {
+            inFlight.current = false;
           }
         }, 1200);
       } catch (e) {
@@ -71,11 +94,11 @@ export function useAnalysis(onComplete?: () => void) {
         // sign-in gate (anon) or the daily-limit card (signed-in). Refresh /api/me.
         if (e instanceof ApiError && e.status === 429) {
           stop();
-          setState({ phase: "idle", progress: 0 });
+          setLive({ phase: "idle", progress: 0 });
           onComplete?.();
           return;
         }
-        setState({ phase: "error", progress: 0, error: errMsg(e) });
+        setLive({ phase: "error", progress: 0, error: errMsg(e) });
       }
     },
     [onComplete],

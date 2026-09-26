@@ -19,7 +19,7 @@ const FRIENDLY_ERRORS: Record<string, string> = {
 export function Progress({ state }: { state: AnalysisState }) {
   if (state.phase === "error") {
     return (
-      <Card className="flex items-start gap-3 border-rose-400/30 bg-rose-500/10 p-4">
+      <Card role="alert" className="flex items-start gap-3 border-rose-400/30 bg-rose-500/10 p-4">
         <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-rose-300" />
         <div>
           <div className="font-medium text-rose-200">Couldn't complete the analysis</div>
@@ -33,7 +33,7 @@ export function Progress({ state }: { state: AnalysisState }) {
 
   const label = LABELS[state.status ?? "submitting"] ?? "Working…";
   return (
-    <Card className="flex items-center gap-3 p-4">
+    <Card className="flex items-center gap-3 p-4" role="status" aria-busy="true">
       <Spinner className="h-5 w-5" />
       <span className="text-sm text-slate-200">
         {label}

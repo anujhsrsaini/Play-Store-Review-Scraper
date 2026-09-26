@@ -11,7 +11,10 @@ export function SharedCompare() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setError("This comparison link is invalid.");
+      return;
+    }
     api
       .compareResult(token)
       .then(setResult)

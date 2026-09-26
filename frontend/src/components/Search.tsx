@@ -5,7 +5,13 @@ import { Button, Card, Input, Skeleton } from "./ui";
 
 const PACKAGE_RE = /^[a-zA-Z0-9._]+$/;
 
-export function Search({ onPick }: { onPick: (app: AppSummary) => void }) {
+export function Search({
+  onPick,
+  autoFocus = true,
+}: {
+  onPick: (app: AppSummary) => void;
+  autoFocus?: boolean;
+}) {
   const [q, setQ] = useState("");
   const [apps, setApps] = useState<AppSummary[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -14,10 +20,29 @@ export function Search({ onPick }: { onPick: (app: AppSummary) => void }) {
   const run = async () => {
     const query = q.trim();
     if (!query) return;
-    // A bare package id (dotted, no spaces) can be analyzed directly.
+    // A bare package id (dotted, no spaces) can be analyzed directly — but only
+    // after confirming it exists, so typos fail here instead of in a late job error.
     if (PACKAGE_RE.test(query) && query.includes(".")) {
-      onPick({ app_id: query, title: query, score: null, installs: null, developer: "direct package id", free: null, icon: null });
-      return;
+      setLoading(true);
+      setError(null);
+      setApps(null);
+      try {
+        const found = await api.search(query);
+        const exact = found.find((a) => a.app_id.toLowerCase() === query.toLowerCase());
+        if (exact) {
+          onPick(exact);
+          return;
+        }
+        // Not in the index: hand the raw id to the backend, which 404s with a
+        // friendly "app not found" card if it truly doesn't exist.
+        onPick({ app_id: query, title: query, score: null, installs: null, developer: "direct package id", free: null, icon: null });
+        return;
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : "Search failed");
+        return;
+      } finally {
+        setLoading(false);
+      }
     }
     setLoading(true);
     setError(null);
@@ -33,20 +58,25 @@ export function Search({ onPick }: { onPick: (app: AppSummary) => void }) {
 
   return (
     <div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Input
-          autoFocus
+          autoFocus={autoFocus}
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && run()}
           placeholder="Search any app — “Spotify”, “Swiggy”… or paste a package id"
+          className="min-w-0 flex-1"
         />
         <Button onClick={run} loading={loading} size="lg">
           <SearchIcon className="h-4 w-4" /> Search
         </Button>
       </div>
 
-      {error && <p className="mt-3 text-sm text-rose-300">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-rose-300">
+          {error}
+        </p>
+      )}
 
       {loading && (
         <div className="mt-4 grid gap-2 sm:grid-cols-2">

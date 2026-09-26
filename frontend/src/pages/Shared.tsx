@@ -11,7 +11,10 @@ export function Shared() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id) {
+      setError("This analysis link is invalid.");
+      return;
+    }
     api
       .analysis(id)
       .then(setResult)

@@ -6,7 +6,8 @@ import { Badge, Button, Card } from "./ui";
 const sectionTitle = "mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500";
 
 function sideLabel(result: CompareResult, side: "a" | "b"): string {
-  return side === "a" ? result.app_a_id : result.app_b_id;
+  if (side === "a") return result.app_a_title || result.app_a_id;
+  return result.app_b_title || result.app_b_id;
 }
 
 function ThemeList({ themes, quotes }: { themes: CompareTheme[]; quotes: CompareQuote[] }) {
@@ -54,31 +55,32 @@ export function CompareResultView({
     comparison.winner === "tie"
       ? "Even match"
       : comparison.winner === "a"
-        ? `${result.app_a_id} leads`
+        ? `${sideLabel(result, "a")} leads`
         : comparison.winner === "b"
-          ? `${result.app_b_id} leads`
+          ? `${sideLabel(result, "b")} leads`
           : null;
 
   const share = async () => {
     if (!share_token) return;
+    const url = `${window.location.origin}/c/${share_token}`;
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/c/${share_token}`);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(url);
     } catch {
-      /* clipboard unavailable */
+      window.prompt("Copy this link:", url);
     }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
   };
 
   return (
     <Card className="overflow-hidden">
-      <div className="flex items-center gap-3 border-b border-white/10 p-4 sm:p-5">
+      <div className="flex flex-wrap items-center gap-3 border-b border-white/10 p-4 sm:p-5">
         <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-white/[0.06] text-indigo-300">
           <ArrowLeftRight className="h-5 w-5" />
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1 basis-40">
           <div className="truncate font-semibold text-white">
-            {result.app_a_id} <span className="text-slate-500">vs</span> {result.app_b_id}
+            {sideLabel(result, "a")} <span className="text-slate-500">vs</span> {sideLabel(result, "b")}
           </div>
           <div className="text-xs text-slate-400">
             last {result.lookback_days} days · {model}

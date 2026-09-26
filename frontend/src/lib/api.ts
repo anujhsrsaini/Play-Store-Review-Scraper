@@ -81,6 +81,9 @@ export interface Me {
   is_anon?: boolean; // anonymous free-trial visitor (not signed in)
   email: string;
   name: string;
+  tier: string; // free | starter | pro
+  is_paid: boolean;
+  extra_credits: number;
   used: number;
   quota: number;
   remaining: number;
@@ -141,6 +144,8 @@ export interface Comparison {
 export interface CompareResult {
   app_a_id: string;
   app_b_id: string;
+  app_a_title?: string | null;
+  app_b_title?: string | null;
   country: string;
   lang: string;
   lookback_days: number;

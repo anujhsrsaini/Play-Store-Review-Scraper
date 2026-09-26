@@ -1,6 +1,7 @@
 import { ArrowLeftRight } from "lucide-react";
 import { useCallback, useState } from "react";
 import { CompareResultView } from "@/components/CompareResult";
+import { Pricing } from "@/components/Pricing";
 import { Search } from "@/components/Search";
 import { SignInUpsell } from "@/components/SignInUpsell";
 import { Button, Card, Input } from "@/components/ui";
@@ -14,7 +15,7 @@ export function Compare({ me, authEnabled, onUsed }: { me: Me | null; authEnable
   const [appB, setAppB] = useState<AppSummary | null>(null);
   const [focus, setFocus] = useState("");
   const [lookback, setLookback] = useState<number>(90);
-  const [picking, setPicking] = useState<"a" | "b">("a");
+  const [picking, setPicking] = useState<"a" | "b" | "done">("a");
   const onComplete = useCallback(() => onUsed(), [onUsed]);
   const { state, submit, reset } = useCompare(onComplete);
 
@@ -33,12 +34,23 @@ export function Compare({ me, authEnabled, onUsed }: { me: Me | null; authEnable
   const isAnon = me?.is_anon === true;
   const quotaExhausted = me != null && me.remaining <= 0;
   const showResult = state.phase === "done" && state.result;
-  const canSubmit = appA && appB && appA.app_id !== appB.app_id && state.phase !== "working";
+  const canSubmit =
+    appA &&
+    appB &&
+    appA.app_id !== appB.app_id &&
+    state.phase !== "working" &&
+    !quotaExhausted;
 
   const pick = (slot: "a" | "b") => (a: AppSummary) => {
+    const nextA = slot === "a" ? a : appA;
+    const nextB = slot === "b" ? a : appB;
     if (slot === "a") setAppA(a);
     else setAppB(a);
     reset();
+    // Auto-advance: after picking A move to B; when both are set, collapse
+    // the pickers into confirmation chips.
+    if (nextA && nextB) setPicking("done");
+    else setPicking(slot === "a" ? "b" : "a");
   };
 
   const onSubmit = () => {
@@ -63,64 +75,85 @@ export function Compare({ me, authEnabled, onUsed }: { me: Me | null; authEnable
 
       <Card className="p-4 sm:p-5">
         <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
-              App A {appA && <span className="text-slate-200">· {appA.title ?? appA.app_id}</span>}
-            </div>
-            {picking === "a" ? (
-              <Search onPick={pick("a")} />
-            ) : (
-              <Button variant="ghost" size="sm" onClick={() => setPicking("a")}>
-                {appA ? "Change app A" : "Pick app A"}
-              </Button>
-            )}
-          </div>
-          <div>
-            <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
-              App B {appB && <span className="text-slate-200">· {appB.title ?? appB.app_id}</span>}
-            </div>
-            {picking === "b" ? (
-              <Search onPick={pick("b")} />
-            ) : (
-              <Button variant="ghost" size="sm" onClick={() => setPicking("b")}>
-                {appB ? "Change app B" : "Pick app B"}
-              </Button>
-            )}
-          </div>
+          <SlotPicker
+            label="App A"
+            app={appA}
+            open={picking === "a"}
+            onPick={pick("a")}
+            onChange={() => setPicking("a")}
+          />
+          <SlotPicker
+            label="App B"
+            app={appB}
+            open={picking === "b"}
+            onPick={pick("b")}
+            onChange={() => setPicking("b")}
+          />
         </div>
 
         <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
-          <Input
-            value={focus}
-            onChange={(e) => setFocus(e.target.value)}
-            placeholder="Angle (optional) — “battery life”, “onboarding”…"
-            maxLength={500}
-          />
-          <select
-            value={lookback}
-            onChange={(e) => setLookback(Number(e.target.value))}
-            className="rounded-xl border border-white/10 bg-white/[0.04] px-3 text-sm text-slate-100"
-            aria-label="Lookback window"
-          >
-            {LOOKBACKS.map((d) => (
-              <option key={d} value={d}>
-                last {d} days
-              </option>
-            ))}
-          </select>
+          <div>
+            <label htmlFor="compare-focus" className="mb-1 block text-xs font-medium text-slate-400">
+              Angle (optional)
+            </label>
+            <Input
+              id="compare-focus"
+              value={focus}
+              onChange={(e) => setFocus(e.target.value)}
+              placeholder="“battery life”, “onboarding”…"
+              maxLength={500}
+            />
+          </div>
+          <div>
+            <label htmlFor="compare-lookback" className="mb-1 block text-xs font-medium text-slate-400">
+              Window
+            </label>
+            <select
+              id="compare-lookback"
+              value={lookback}
+              onChange={(e) => setLookback(Number(e.target.value))}
+              className="h-10 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-sm text-slate-100"
+              aria-label="Lookback window"
+            >
+              {LOOKBACKS.map((d) => (
+                <option key={d} value={d} className="bg-slate-900">
+                  last {d} days
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button onClick={onSubmit} disabled={!canSubmit} loading={state.phase === "working"}>
             <ArrowLeftRight className="h-4 w-4" /> Compare
           </Button>
           {appA && appB && appA.app_id === appB.app_id && (
             <span className="text-xs text-amber-300">Pick two different apps.</span>
           )}
+          {quotaExhausted && (
+            <span className="text-xs text-amber-300">
+              Daily limit reached — upgrade below to run this comparison.
+            </span>
+          )}
         </div>
       </Card>
 
       {quotaExhausted && isAnon && <SignInUpsell variant="gate" />}
+      {quotaExhausted && !isAnon && (
+        <Card className="p-5 text-sm text-slate-300">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/20 bg-amber-400/10 px-2.5 py-0.5 text-xs font-medium text-amber-300 mb-1.5">
+            Daily limit reached ({me?.used}/{me?.quota} used)
+          </span>
+          <h3 className="text-base font-semibold text-white">Need more comparisons today?</h3>
+          <p className="mt-1 text-xs text-slate-400">
+            Your quota resets at UTC midnight. Upgrade for a higher daily limit.
+          </p>
+          <div className="mt-3">
+            <Pricing me={me} />
+          </div>
+        </Card>
+      )}
 
       {state.phase === "working" && (
         <Card className="p-5">
@@ -134,10 +167,56 @@ export function Compare({ me, authEnabled, onUsed }: { me: Me | null; authEnable
         </Card>
       )}
       {state.phase === "error" && (
-        <Card className="p-5 text-sm text-rose-300">{state.error ?? "Comparison failed"}</Card>
+        <Card className="p-5 text-sm text-rose-300" role="alert">
+          {state.error ?? "Comparison failed"}
+        </Card>
       )}
       {showResult && state.result && <CompareResultView result={state.result} onCompareAnother={reset} />}
       {showResult && isAnon && <SignInUpsell variant="soft" />}
+    </div>
+  );
+}
+
+function SlotPicker({
+  label,
+  app,
+  open,
+  onPick,
+  onChange,
+}: {
+  label: string;
+  app: AppSummary | null;
+  open: boolean;
+  onPick: (a: AppSummary) => void;
+  onChange: () => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+        {label}
+      </div>
+      {open || !app ? (
+        <Search onPick={onPick} autoFocus={open} />
+      ) : (
+        <button
+          type="button"
+          onClick={onChange}
+          title="Change app"
+          className="flex w-full items-center gap-2.5 rounded-xl border border-emerald-400/25 bg-emerald-400/[0.07] px-3 py-2 text-left transition hover:border-emerald-400/50"
+        >
+          {app.icon ? (
+            <img src={app.icon} alt="" className="h-8 w-8 rounded-lg ring-1 ring-white/10" />
+          ) : (
+            <div className="h-8 w-8 rounded-lg bg-white/10" />
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-slate-100">
+              {app.title ?? app.app_id}
+            </span>
+            <span className="block truncate text-xs text-slate-500">{app.app_id} · tap to change</span>
+          </span>
+        </button>
+      )}
     </div>
   );
 }

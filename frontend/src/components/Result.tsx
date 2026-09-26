@@ -1,6 +1,7 @@
 import { Check, FileText, Info, Link2, MessageSquarePlus, Star } from "lucide-react";
 import { useState } from "react";
 import type { AnalysisResult, Theme } from "@/lib/api";
+import { SITE_URL } from "@/lib/site";
 import { Badge, Button, Card } from "./ui";
 import { RatingHistogram, SentimentDonut } from "./Charts";
 
@@ -19,9 +20,9 @@ export function Result({
 
   return (
     <Card className="overflow-hidden">
-      <div className="flex items-center gap-3 border-b border-white/10 p-4 sm:p-5">
-        {app.icon && <img src={app.icon} alt="" className="h-12 w-12 rounded-xl ring-1 ring-white/10" />}
-        <div className="min-w-0">
+      <div className="flex flex-wrap items-center gap-3 border-b border-white/10 p-4 sm:p-5">
+        {app.icon && <img src={app.icon} alt="" className="h-12 w-12 shrink-0 rounded-xl ring-1 ring-white/10" />}
+        <div className="min-w-0 flex-1 basis-40">
           <div className="truncate font-semibold text-white">{app.title ?? app.app_id}</div>
           <div className="flex items-center gap-2 text-xs text-slate-400">
             {app.score != null && (
@@ -293,7 +294,7 @@ function CopyMarkdownButton({ result }: { result: AnalysisResult }) {
       `## Verified User Evidence`,
       ...answer.supporting_quotes.map((q) => `> "${q.quote}"\n> — ★${q.stars ?? "?"} (${q.date ?? "Unknown"})`),
       "",
-      `*Generated with Review Lens (https://reviewlens.app)*`,
+      `*Generated with Review Lens (${SITE_URL})*`,
     ].join("\n");
 
     try {

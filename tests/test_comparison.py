@@ -9,6 +9,8 @@ these tests pin the storage contract it will build on.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -51,6 +53,33 @@ def _result(**overrides) -> ComparisonResult:
     }
     params.update(overrides)
     return ComparisonResult(**params)
+
+
+def test_compare_payload_carries_app_titles(comparison_session):
+    from playstore_review_service.db import Snapshot
+    from playstore_review_service.webapp import _compare_payload
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)  # noqa: UP017 — runtime is 3.10
+    snap_a = Snapshot(
+        app_id="com.example.a",
+        country="us",
+        lang="en",
+        app_meta={"title": "Example A"},
+        fetched_at=now,
+    )
+    snap_b = Snapshot(
+        app_id="com.example.b",
+        country="us",
+        lang="en",
+        app_meta={},
+        fetched_at=now,
+    )
+    out = _compare_payload(_result(), snap_a, snap_b)
+    assert out["app_a_title"] == "Example A"
+    assert out["app_b_title"] == "com.example.b"  # falls back to package id
+    # Purged snapshots must not break the payload.
+    out = _compare_payload(_result(), None, None)
+    assert out["app_a_title"] == "com.example.a"
 
 
 def test_comparison_job_round_trip(comparison_session):

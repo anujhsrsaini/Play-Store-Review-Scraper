@@ -116,9 +116,13 @@ def _compare_payload(
 ) -> dict:
     """Public payload for a finished comparison. Snapshots may be None (purged after
     the result was computed) — the persisted result JSON is self-contained."""
+    meta_a = snap_a.app_meta or {} if snap_a else {}
+    meta_b = snap_b.app_meta or {} if snap_b else {}
     payload = {
         "app_a_id": record.app_a_id,
         "app_b_id": record.app_b_id,
+        "app_a_title": meta_a.get("title") or record.app_a_id,
+        "app_b_title": meta_b.get("title") or record.app_b_id,
         "country": record.country,
         "lang": record.lang,
         "lookback_days": record.lookback_days,

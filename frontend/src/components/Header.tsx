@@ -8,12 +8,12 @@ export function Header({ me, authEnabled }: { me: Me | null; authEnabled: boolea
   return (
     <header className="sticky top-0 z-20 border-b border-white/10 bg-ink/60 backdrop-blur-xl">
       <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
-        <a href="/" className="flex items-center gap-2 font-semibold text-white">
+        <Link to="/" className="flex items-center gap-2 font-semibold text-white">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-grad shadow-glow-sm">
             <ScanSearch className="h-5 w-5 text-white" />
           </span>
           <span className="tracking-tight">Review Lens</span>
-        </a>
+        </Link>
         <span className="hidden text-sm text-slate-500 sm:inline">· Play Store review analysis</span>
         <div className="ml-auto flex items-center gap-3">
           <Link
@@ -60,7 +60,10 @@ export function Header({ me, authEnabled }: { me: Me | null; authEnabled: boolea
           ) : me ? (
             <>
               <Badge tone={me.remaining > 0 ? "neutral" : "negative"}>
-                {me.remaining}/{me.quota} left today
+                {me.is_paid
+                  ? `${me.tier === "pro" ? "Pro" : "Indie Pro"} · ${me.remaining}/${me.quota} left today`
+                  : `${me.remaining}/${me.quota} left today`}
+                {me.extra_credits > 0 && ` · +${me.extra_credits} credits`}
               </Badge>
               {authEnabled && (
                 <a

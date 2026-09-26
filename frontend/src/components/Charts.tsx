@@ -12,9 +12,16 @@ export function SentimentDonut({ s }: { s: Sentiment }) {
     { name: "Negative", value: s.negative_pct, color: NEG },
   ].filter((d) => d.value > 0);
 
+  const label = `Sentiment: ${Math.round(s.positive_pct)}% positive, ${Math.round(
+    s.neutral_pct,
+  )}% neutral, ${Math.round(s.negative_pct)}% negative, from ${s.counted} star ratings`;
   return (
     <div className="flex items-center gap-5">
-      <div className="relative h-28 w-28 shrink-0 drop-shadow-[0_0_18px_rgba(52,211,153,0.25)]">
+      <div
+        className="relative h-28 w-28 shrink-0 drop-shadow-[0_0_18px_rgba(52,211,153,0.25)]"
+        role="img"
+        aria-label={label}
+      >
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
@@ -62,8 +69,12 @@ export function RatingHistogram({ histogram }: { histogram: number[] }) {
   // histogram is [1★,2★,3★,4★,5★] lifetime counts
   const data = histogram.map((count, i) => ({ star: `${i + 1}★`, count }));
   const max = Math.max(...histogram, 1);
+  const total = histogram.reduce((a, b) => a + b, 0);
+  const label = `Star rating histogram: ${histogram
+    .map((c, i) => `${i + 1} star: ${c}`)
+    .join(", ")}; ${total} ratings total`;
   return (
-    <div className="h-28 w-full">
+    <div className="h-28 w-full" role="img" aria-label={label}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
           <XAxis dataKey="star" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "#94a3b8" }} />
