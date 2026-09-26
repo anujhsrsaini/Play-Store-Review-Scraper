@@ -153,6 +153,59 @@ def test_pagination_invariants_hold_across_caps(reviews_page1, reviews_page2):
         assert len(ids) == len(set(ids))  # uniqueness
 
 
+def _cutoff_row(rid: str, at: str | None) -> dict:
+    return {"reviewId": rid, "content": "x", "score": 5, "at": at}
+
+
+def test_pagination_cutoff_stops_at_first_older_review():
+    """cutoff_iso bounds the time window: paging ends at the first review older
+    than the cutoff without consuming further pages (Phase 7 lookback windows)."""
+    calls = {"n": 0}
+
+    def fetch_page(_token):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [
+                _cutoff_row("new1", "2026-09-20T10:00:00"),
+                _cutoff_row("old1", "2026-05-01T10:00:00"),
+                _cutoff_row("new2", "2026-09-21T10:00:00"),
+            ], "more"
+        raise AssertionError("cutoff hit must stop paging before the next fetch")
+
+    out, complete = paginate_reviews(
+        fetch_page, max_reviews=100, delay_seconds=0, cutoff_iso="2026-08-01T00:00:00"
+    )
+    assert [r.review_id for r in out] == ["new1"]
+    assert complete is True
+    assert calls["n"] == 1
+
+
+def test_pagination_cutoff_none_keeps_all_pages(reviews_page1, reviews_page2):
+    out, complete = paginate_reviews(
+        _pager([reviews_page1, reviews_page2]),
+        max_reviews=100,
+        delay_seconds=0,
+        cutoff_iso=None,
+    )
+    assert [r.review_id for r in out] == ["r1", "r2", "r3"]
+    assert complete is True
+
+
+def test_pagination_cutoff_tolerates_missing_and_bad_timestamps():
+    out, complete = paginate_reviews(
+        _pager(
+            [
+                [_cutoff_row("no-ts", None), _cutoff_row("bad-ts", "not-a-date")],
+            ]
+        ),
+        max_reviews=100,
+        delay_seconds=0,
+        cutoff_iso="2026-08-01T00:00:00",
+    )
+    assert [r.review_id for r in out] == ["no-ts", "bad-ts"]
+    assert complete is True
+
+
 # ---------------------------------------------------------------- with_retries
 
 

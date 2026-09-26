@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 import playstore_review_service.config as config_mod
 from playstore_review_service.db import UsageLog
 from playstore_review_service.scraper.client import FetchResult
-from playstore_review_service.scraper.errors import AppNotFound
+from playstore_review_service.scraper.errors import AppNotFound, RateLimitedUpstream
 from playstore_review_service.scraper.models import AppInfo, Review
 from playstore_review_service.worker import SpendCapExceeded, process_one
 
@@ -96,11 +96,8 @@ def build_service(tmp_path, monkeypatch, **env):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/test.db")
     monkeypatch.setenv("DEV_INPROCESS_WORKER", "0")
     for var in (
-        "GEMINI_API_KEY",
-        "LLM_PROVIDER",
         "LLM_API_KEY",
         "LLM_BASE_URL",
-        "LLM_COMPARTMENT_ID",
         "GOOGLE_CLIENT_ID",
         "GOOGLE_CLIENT_SECRET",
         "GOOGLE_REDIRECT_URI",
@@ -144,6 +141,107 @@ def test_search_endpoint(service):
     apps = client.get("/api/search", params={"q": "calculator"}).json()
     assert apps[0]["app_id"] == APP_ID
     assert apps[0]["icon"] == "https://example.com/icon.png"  # surfaced for the UI
+
+
+def test_search_upstream_failure_returns_generic_error(service, monkeypatch):
+    """Spec §4.5: upstream scrape failures must not leak internal exception names."""
+    from playstore_review_service.scraper import client as scraper_client_mod
+    from playstore_review_service.scraper.errors import ScraperUnavailable
+
+    def _boom(*args, **kwargs):
+        raise ScraperUnavailable("429 gateway throttle")
+
+    monkeypatch.setattr(scraper_client_mod, "search_apps", _boom, raising=True)
+    client, _sf = service
+    res = client.get("/api/search", params={"q": "calculator"})
+    assert res.status_code == 502
+    assert res.json() == {"detail": "upstream_unavailable"}
+
+
+def _seed_expired_snapshot(sf, app_id=APP_ID):
+    """Expired snapshot with one recent cached review; returns nothing (spec §4.6:
+    stale cache is served with a caveat on transient upstream failure)."""
+    from playstore_review_service.db import CachedReview, Snapshot
+
+    recent = (datetime.now(UTC) - timedelta(days=5)).strftime("%Y-%m-%dT10:00:00")
+    past = datetime.now(UTC) - timedelta(hours=30)
+    with sf() as s:
+        snap = Snapshot(
+            app_id=app_id,
+            country="us",
+            lang="en",
+            review_count=1,
+            complete=True,
+            app_meta={},
+            fetched_at=past,
+            expires_at=past,
+        )
+        s.add(snap)
+        s.flush()
+        s.add(
+            CachedReview(
+                snapshot_id=snap.id,
+                review_id="r-stale-1",
+                score=2,
+                text="keeps crashing constantly",
+                created_at=recent,
+            )
+        )
+        s.commit()
+
+
+def test_stale_snapshot_served_with_caveat_on_transient_failure(tmp_path, monkeypatch):
+    from playstore_review_service.scraper import client as scraper_client_mod
+
+    def _throttled(*args, **kwargs):
+        raise RateLimitedUpstream("429 gateway throttle")
+
+    with build_service(tmp_path, monkeypatch) as (client, sf):
+        _seed_expired_snapshot(sf)
+        monkeypatch.setattr(scraper_client_mod, "get_app", _throttled, raising=True)
+        monkeypatch.setattr(scraper_client_mod, "fetch_reviews", _throttled, raising=True)
+        body = client.post(
+            "/api/analyze", json={"app_id": APP_ID, "question": "stale fallback check?"}
+        ).json()
+        assert process_one(sf) is True
+        done = client.get(f"/api/jobs/{body['job_id']}").json()
+        assert done["status"] == "done"
+        caveats = done["result"]["answer"].get("caveats") or []
+        assert any("temporarily unavailable" in c for c in caveats)
+
+
+def test_transient_failure_without_cache_still_errors(tmp_path, monkeypatch):
+    from playstore_review_service.scraper import client as scraper_client_mod
+
+    def _throttled(*args, **kwargs):
+        raise RateLimitedUpstream("429 gateway throttle")
+
+    with build_service(tmp_path, monkeypatch) as (client, sf):
+        monkeypatch.setattr(scraper_client_mod, "get_app", _throttled, raising=True)
+        monkeypatch.setattr(scraper_client_mod, "fetch_reviews", _throttled, raising=True)
+        body = client.post(
+            "/api/analyze", json={"app_id": APP_ID, "question": "nothing cached here?"}
+        ).json()
+        assert process_one(sf) is True
+        assert client.get(f"/api/jobs/{body['job_id']}").json()["status"] == "error"
+
+
+def test_unknown_app_never_serves_stale_cache(tmp_path, monkeypatch):
+    from playstore_review_service.scraper import client as scraper_client_mod
+
+    def _missing(app_id, **kwargs):
+        raise AppNotFound(app_id)
+
+    with build_service(tmp_path, monkeypatch) as (client, sf):
+        _seed_expired_snapshot(sf)
+        monkeypatch.setattr(scraper_client_mod, "get_app", _missing, raising=True)
+        body = client.post(
+            "/api/analyze", json={"app_id": APP_ID, "question": "bad id, no stale?"}
+        ).json()
+        assert process_one(sf) is True
+        done = client.get(f"/api/jobs/{body['job_id']}").json()
+        assert done["status"] == "error"
+        assert done.get("result") is None
 
 
 def test_share_permalink_returns_cached_analysis(service):
@@ -239,19 +337,20 @@ def test_job_not_found_and_invalid_id(service):
     assert client.get("/api/jobs/--bad--").status_code == 422
 
 
-def test_spend_cap_blocks_gemini_calls(service, monkeypatch):
+def test_spend_cap_blocks_llm_calls(service, monkeypatch):
     """With a key set and the cap already consumed, the job fails clearly — no LLM call."""
     client, sf = service
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key-never-used")
+    monkeypatch.setenv("LLM_API_KEY", "test-key-never-used")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.sarvam.ai/v2")
     monkeypatch.setenv("GLOBAL_DAILY_SPEND_CAP_USD", "0")
     config_mod.get_settings.cache_clear()
 
     import playstore_review_service.worker as worker_mod
 
     def must_not_be_called(*a, **kw):
-        raise AssertionError("gemini_analyze must not be called past the spend cap")
+        raise AssertionError("openai_compatible_analyze must not be called past the spend cap")
 
-    monkeypatch.setattr(worker_mod.llm, "gemini_analyze", must_not_be_called)
+    monkeypatch.setattr(worker_mod.llm_openai, "openai_compatible_analyze", must_not_be_called)
 
     body = client.post(
         "/api/analyze", json={"app_id": APP_ID, "question": "does the cap work?"}
@@ -263,60 +362,10 @@ def test_spend_cap_blocks_gemini_calls(service, monkeypatch):
     config_mod.get_settings.cache_clear()
 
 
-def test_openai_compatible_provider_used_when_configured(service, monkeypatch):
-    """With OCI env configured, the worker routes through the OpenAI-compatible adapter,
-    records the model, and still applies quote verification."""
-    client, sf = service
-    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("LLM_API_KEY", "fake-token")
-    monkeypatch.setenv("LLM_BASE_URL", "https://oci.example/openai/v1")
-    monkeypatch.setenv("LLM_COMPARTMENT_ID", "ocid1.tenancy.oc1..test")
-    monkeypatch.setenv("LLM_CHEAP_MODEL", "xai.grok-3-mini")
-    config_mod.get_settings.cache_clear()
-
-    import playstore_review_service.worker as worker_mod
-
-    calls: dict = {}
-
-    def fake_oci(question, lines, *, base_url, api_key, compartment_id, model, **kw):
-        calls["model"] = model
-        calls["compartment_id"] = compartment_id
-        return (
-            {
-                "summary": "OCI Grok: crashes dominate the negative reviews.",
-                "not_enough_data": False,
-                "themes": [],
-                # real substring of a fixture review (r0 is 1★ "keeps crashing constantly")
-                "supporting_quotes": [
-                    {"id": "r0", "quote": "keeps crashing constantly", "stars": 1},
-                    {"id": "r0", "quote": "this quote is fabricated", "stars": 1},
-                ],
-                "caveats": [],
-            },
-            {"tokens_in": 100, "tokens_out": 20},
-        )
-
-    monkeypatch.setattr(worker_mod.llm_openai, "openai_compatible_analyze", fake_oci)
-
-    body = client.post("/api/analyze", json={"app_id": APP_ID, "question": "what is wrong?"}).json()
-    process_one(sf)
-    out = client.get(f"/api/jobs/{body['job_id']}").json()
-
-    assert out["status"] == "done"
-    assert calls["model"] == "xai.grok-3-mini"
-    assert calls["compartment_id"] == "ocid1.tenancy.oc1..test"
-    answer = out["result"]["answer"]
-    assert out["result"]["model"] == "xai.grok-3-mini"
-    assert answer["summary"].startswith("OCI Grok")
-    # quote verification still runs: the fabricated quote is dropped, the real one kept
-    assert [q["quote"] for q in answer["supporting_quotes"]] == ["keeps crashing constantly"]
-    assert answer["sentiment_breakdown"]["source"] == "period_sample"
-    config_mod.get_settings.cache_clear()
-
-
 def test_sarvam_provider_used_when_configured(service, monkeypatch):
+    """With Sarvam env configured, the worker routes through the OpenAI-compatible
+    adapter, records the model, and still applies quote verification."""
     client, sf = service
-    monkeypatch.setenv("LLM_PROVIDER", "sarvam")
     monkeypatch.setenv("LLM_BASE_URL", "https://api.sarvam.ai/v2")
     monkeypatch.setenv("LLM_API_KEY", "sarvam-key-test")
     monkeypatch.setenv("LLM_CHEAP_MODEL", "deepseekv4-flash")
@@ -326,18 +375,19 @@ def test_sarvam_provider_used_when_configured(service, monkeypatch):
 
     calls: dict = {}
 
-    def fake_sarvam(question, lines, *, base_url, api_key, compartment_id="", model, **kw):
+    def fake_sarvam(question, lines, *, base_url, api_key, model, **kw):
         calls["model"] = model
         calls["base_url"] = base_url
         calls["api_key"] = api_key
-        calls["compartment_id"] = compartment_id
         return (
             {
-                "summary": "Sarvam DeepSeek: crashes reported.",
+                "summary": "Sarvam DeepSeek: crashes dominate the negative reviews.",
                 "not_enough_data": False,
                 "themes": [],
+                # real substring of a fixture review (r0 is 1★ "keeps crashing constantly")
                 "supporting_quotes": [
                     {"id": "r0", "quote": "keeps crashing constantly", "stars": 1},
+                    {"id": "r0", "quote": "this quote is fabricated", "stars": 1},
                 ],
                 "caveats": [],
             },
@@ -354,9 +404,11 @@ def test_sarvam_provider_used_when_configured(service, monkeypatch):
     assert calls["model"] == "deepseekv4-flash"
     assert calls["base_url"] == "https://api.sarvam.ai/v2"
     assert calls["api_key"] == "sarvam-key-test"
-    assert calls["compartment_id"] == ""
+    answer = out["result"]["answer"]
     assert out["result"]["model"] == "deepseekv4-flash"
-    assert out["result"]["answer"]["summary"].startswith("Sarvam DeepSeek")
+    assert answer["summary"].startswith("Sarvam DeepSeek")
+    # quote verification still runs: the fabricated quote is dropped, the real one kept
+    assert [q["quote"] for q in answer["supporting_quotes"]] == ["keeps crashing constantly"]
     config_mod.get_settings.cache_clear()
 
 

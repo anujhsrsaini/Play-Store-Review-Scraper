@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from playstore_review_service.analysis import (
+    canonical_pair_hash,
     curate_reviews,
+    custom_focus_hash,
     format_review_lines,
+    lookback_cutoff_iso,
     normalize_question,
     question_hash,
+    snapshots_hash,
     star_sentiment,
     stub_analysis,
+    stub_compare,
+    verify_comparison_quotes,
     verify_quotes,
 )
 
@@ -131,3 +137,119 @@ def test_stub_analysis_shape_and_honesty():
 def test_stub_analysis_empty_reviews():
     out = stub_analysis("anything?", [])
     assert out["not_enough_data"] is True
+
+
+# ------------------------------------------------------- Battle Lens hashing
+
+
+def test_canonical_pair_hash_is_order_invariant():
+    assert canonical_pair_hash("com.a", "com.b") == canonical_pair_hash("com.b", "com.a")
+    assert canonical_pair_hash("com.a", "com.b") != canonical_pair_hash("com.a", "com.c")
+    assert canonical_pair_hash("com.a", "com.a") != canonical_pair_hash("com.a", "com.b")
+
+
+def test_snapshots_hash_order_invariant_but_invalidated_by_rescrape():
+    base = snapshots_hash("com.a", 1, "2026-09-20T10:00:00", "com.b", 2, "2026-09-21T10:00:00")
+    swapped = snapshots_hash("com.b", 2, "2026-09-21T10:00:00", "com.a", 1, "2026-09-20T10:00:00")
+    assert base == swapped
+    rescraped = snapshots_hash("com.a", 3, "2026-09-25T10:00:00", "com.b", 2, "2026-09-21T10:00:00")
+    assert rescraped != base
+
+
+def test_custom_focus_hash_blank_and_normalized():
+    assert custom_focus_hash(None) == custom_focus_hash("")
+    assert custom_focus_hash("  Battery Life? ") == custom_focus_hash("battery life")
+    assert custom_focus_hash("battery") != custom_focus_hash("camera")
+
+
+def test_lookback_cutoff_iso():
+    from datetime import datetime
+
+    now = datetime(2026, 9, 25, 12, 0, 0)
+    assert lookback_cutoff_iso(30, now) == "2026-08-26T12:00:00"
+    assert lookback_cutoff_iso(0, now) == "2026-06-27T12:00:00"  # fallback: 90d window
+    assert lookback_cutoff_iso(-5, now) == "2026-06-27T12:00:00"
+
+
+# ------------------------------------------------------- Battle Lens verify
+
+
+def _compare_payload():
+    return {
+        "summary": "A wins",
+        "not_enough_data": False,
+        "themes": [
+            {
+                "label": "crashes",
+                "polarity": "negative",
+                "prevalence": "high",
+                "side": "a",
+                "supporting_quote_ids": ["r1"],
+            },
+            {
+                "label": "design",
+                "polarity": "positive",
+                "prevalence": "high",
+                "side": "both",
+                "supporting_quote_ids": ["r1", "r9"],
+            },
+            {
+                "label": "ghost",
+                "polarity": "negative",
+                "prevalence": "low",
+                "side": "b",
+                "supporting_quote_ids": ["nope"],
+            },
+        ],
+        "supporting_quotes": [
+            {"id": "r1", "quote": "keeps crashing badly", "side": "a"},
+            {"id": "r9", "quote": "love the new design", "side": "b"},
+            {"id": "r1", "quote": "keeps crashing badly", "side": "b"},  # misattributed
+            {"id": "r9", "quote": "ok", "side": "b"},  # too short
+            {"id": "r9", "quote": "love the new design"},  # no side
+        ],
+        "caveats": [],
+    }
+
+
+def test_verify_comparison_quotes_per_side_attribution():
+    out = verify_comparison_quotes(
+        _compare_payload(),
+        {"r1": "the app keeps crashing badly after update"},
+        {"r9": "i love the new design here"},
+        app_a_id="com.a",
+        app_b_id="com.b",
+    )
+    kept = [(q["id"], q["side"]) for q in out["supporting_quotes"]]
+    assert kept == [("r1", "a"), ("r9", "b")]  # misattributed/short/sideless dropped
+    labels = [t["label"] for t in out["themes"]]
+    assert labels == ["crashes", "design"]  # ghost theme orphaned; both-theme kept
+    assert out["not_enough_data"] is False
+    assert any("misattributed" in c for c in out["caveats"])
+
+
+def test_verify_comparison_quotes_one_sided_caveat_and_empty():
+    one_sided = verify_comparison_quotes(
+        _compare_payload(),
+        {"r1": "the app keeps crashing badly after update"},
+        {},
+        app_a_id="com.a",
+        app_b_id="com.b",
+    )
+    assert one_sided["not_enough_data"] is False
+    assert any("com.b" in c and "one-sided" in c for c in one_sided["caveats"])
+    empty = verify_comparison_quotes(
+        {"summary": "x", "themes": [], "supporting_quotes": []}, {}, {}
+    )
+    assert empty["not_enough_data"] is True
+
+
+def test_stub_compare_tags_sides():
+    a = [_review(1, 1, "keeps crashing constantly"), _review(2, 1, "crashes on start")]
+    b = [_review(3, 5, "love the clean design"), _review(4, 5, "great design love it")]
+    out = stub_compare("com.a", "com.b", a, b, custom_focus="design")
+    assert out["not_enough_data"] is False
+    assert {t["side"] for t in out["themes"]} <= {"a", "b"}
+    assert {q["side"] for q in out["supporting_quotes"]} <= {"a", "b"}
+    assert "com.a" in out["summary"] and "com.b" in out["summary"]
+    assert any("Keyword-based fallback" in c for c in out["caveats"])

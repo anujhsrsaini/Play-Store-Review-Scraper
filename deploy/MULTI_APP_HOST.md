@@ -24,17 +24,17 @@ private 127.0.0.1 port. Only 80/443 are ever public.
 | DNS | **Per-subdomain `A` records** → box IP, TTL 300 | Only declared names resolve (tighter than a wildcard). Apex untouched. |
 | Database | **One Postgres container per app** | Isolation > the trivial ~40 MB/container overhead; independent backup/upgrade/restore. |
 | Process mgmt | **Compose `restart: unless-stopped` + `systemctl enable docker`** | No per-app systemd units to maintain; everything returns after reboot. |
-| Monitoring | **External uptime ping + cron disk alert + OCI budget alert** | No Prometheus/Grafana — wrong cost/benefit at this scale (would eat 1–2 GB). |
+| Monitoring | **External uptime ping + cron disk alert + Sarvam spend alert** | No Prometheus/Grafana — wrong cost/benefit at this scale (would eat 1–2 GB). |
 | Config layout | **Central Caddyfile that `import`s one symlinked vhost snippet per app** | Adding an app never hand-edits the main file; each app owns its snippet. |
 | Capacity | **~8 app ceiling** on 12 GB / 2 OCPU | Bursty + uncorrelated; leaves OS page cache + build headroom. Resize trigger in §Ops. |
 
 ## 🔴 Must-do before public (blockers)
 
-1. **Rotate the OCI `LLM_API_KEY`** — it was exposed in chat. (Git history is clean; no purge needed. Keep `OCI_GENAI_INTEGRATION.md`, which holds your tenancy OCID, untracked.)
+1. **Sarvam key hygiene** — `LLM_API_KEY` lives only in the app's `.env` (`chmod 600`, gitignored, never baked into an image). If the key was ever pasted in chat or tickets, rotate it in the Sarvam dashboard. (The retired OCI integration doc was placeholders-only and has been removed.)
 2. **No container on `0.0.0.0`** — every published port is `127.0.0.1:<port>`; DB/worker publish nothing. Audit: `docker ps --format '{{.Names}} {{.Ports}}'`.
 3. **Firewall closed at BOTH layers** — OCI security list allows only 80/443 (SSH source-restricted to your IP); host iptables ACCEPT for 80/443 inserted **above** Oracle's default REJECT.
 4. **SSH hardened** — key-only, `PermitRootLogin no`, `PasswordAuthentication no`, non-root `deploy` user (verify a second session works before closing the first).
-5. **Spend cap fails closed** — confirm `GLOBAL_DAILY_SPEND_CAP_USD` hard-stops OCI calls (not just warns) + set an OCI Budget alert as the provider-level backstop.
+5. **Spend cap fails closed** — confirm `GLOBAL_DAILY_SPEND_CAP_USD` hard-stops Sarvam calls (not just warns) + set a Sarvam spend limit/alert as the provider-level backstop.
 6. **Secrets**: each app's `.env` is `chmod 600`, owned by `deploy`, gitignored, never baked into an image.
 7. **HTTPS cookies + OAuth exact-match**: `SESSION_COOKIE_SECURE=1`; Google redirect URI registered as the exact `https://reviews.<domain>/auth/callback`.
 
@@ -100,11 +100,11 @@ deploying — a reused port is a silent bind failure.
 7. `docker compose -f docker-compose.yml -f deploy/compose.colocate.yml up -d --build`
 8. Smoke: `curl -fsS http://127.0.0.1:<port>/health` then `curl -fsS https://<app>.<domain>/health`.
 
-**Review Lens specifics** (app #1): set `LLM_*` (rotated OCI key) + `LLM_COMPARTMENT_ID`,
+**Review Lens specifics** (app #1): set `LLM_BASE_URL` + `LLM_API_KEY` (Sarvam),
 `GOOGLE_CLIENT_ID/SECRET`, `GOOGLE_REDIRECT_URI=https://reviews.<domain>/auth/callback`,
 `SESSION_SECRET`, `SESSION_COOKIE_SECURE=1`, `POSTGRES_PASSWORD`, `GLOBAL_DAILY_SPEND_CAP_USD`,
 `PER_USER_DAILY_ANALYSES=5`. Register the OAuth redirect URI in Google Console and set the
-OCI budget alert. Review Lens already ships `deploy/compose.colocate.yml` (web → 127.0.0.1:8011,
+Sarvam spend alert. Review Lens already ships `deploy/compose.colocate.yml` (web → 127.0.0.1:8011,
 bundled Caddy disabled, mem caps) and `deploy/reviews.caddy` — it *is* the template; new apps
 are copies with the port parameterized.
 

@@ -77,7 +77,7 @@ export function Home({ me, authEnabled, onUsed }: { me: Me | null; authEnabled: 
                     </span>
                     <h3 className="text-base font-semibold text-white">Unlock unlimited questions & deep analysis</h3>
                     <p className="mt-1 text-xs text-slate-400">
-                      Resets at UTC midnight, or upgrade to Indie Pro for high limits, competitor comparisons, and executive exports.
+                      Resets at UTC midnight, or upgrade to Indie Pro for high limits, competitor comparisons, and Markdown exports.
                     </p>
                   </div>
                 </div>
@@ -90,7 +90,7 @@ export function Home({ me, authEnabled, onUsed }: { me: Me | null; authEnabled: 
                         <span className="text-sm font-bold text-gradient">$19/mo</span>
                       </div>
                       <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-                        150 analyses/mo, competitor diffing, CSV/Markdown export & priority queue.
+                        150 analyses/mo, competitor diffing, Markdown export & priority queue.
                       </p>
                     </div>
                     <a
@@ -108,7 +108,7 @@ export function Home({ me, authEnabled, onUsed }: { me: Me | null; authEnabled: 
                         <span className="text-sm font-bold text-slate-200">$15 once</span>
                       </div>
                       <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-                        20 deep analyses + full PDF exports. Valid for 6 months, zero commitment.
+                        20 deep analyses + one-click Markdown exports. Valid for 6 months, zero commitment.
                       </p>
                     </div>
                     <a

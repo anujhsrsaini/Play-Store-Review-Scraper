@@ -1,4 +1,4 @@
-"""Tests for the OpenAI-compatible (OCI GenAI) adapter — no network, injected `post`.
+"""Tests for the Sarvam AI adapter (OpenAI-compatible) — no network, injected `post`.
 
 Test credentials are obvious non-secret placeholders (``fake-token-*``).
 """
@@ -13,7 +13,7 @@ from playstore_review_service.config import Settings
 from playstore_review_service.llm import LLMError, cost_usd
 from playstore_review_service.llm_openai import openai_compatible_analyze
 
-BASE = "https://inference.generativeai.us-ashburn-1.oci.oraclecloud.com/openai/v1"
+BASE = "https://api.sarvam.ai/v2"
 ANSWER = {
     "summary": "Users mostly complain about crashes.",
     "not_enough_data": False,
@@ -61,7 +61,7 @@ def _capturing_post(captured: dict, response: _Resp):
     return fake_post
 
 
-def test_sends_oci_headers_and_openai_body():
+def test_sends_bearer_auth_and_openai_body():
     captured: dict = {}
     post = _capturing_post(captured, _Resp(_chat_response(json.dumps(ANSWER))))
     payload, usage = openai_compatible_analyze(
@@ -69,14 +69,12 @@ def test_sends_oci_headers_and_openai_body():
         "[id=r1 | ★1 | 2026-05-01 | v1] keeps crashing",
         base_url=BASE,
         api_key="fake-token-abc",
-        compartment_id="ocid1.tenancy.oc1..abc",
-        model="xai.grok-3-mini",
+        model="deepseekv4-flash",
         post=post,
     )
     assert captured["url"] == f"{BASE}/chat/completions"
     assert captured["headers"]["Authorization"] == "Bearer fake-token-abc"
-    assert captured["headers"]["CompartmentId"] == "ocid1.tenancy.oc1..abc"
-    assert captured["body"]["model"] == "xai.grok-3-mini"
+    assert captured["body"]["model"] == "deepseekv4-flash"
     assert [m["role"] for m in captured["body"]["messages"]] == ["system", "user"]
     # schema is injected into the prompt (no response_format reliance)
     assert "JSON Schema" in captured["body"]["messages"][0]["content"]
@@ -85,7 +83,7 @@ def test_sends_oci_headers_and_openai_body():
     assert usage == {"tokens_in": 1234, "tokens_out": 56, "cost_usd": None}
 
 
-def test_real_oci_cost_from_ticks_preferred_over_estimate():
+def test_real_cost_from_ticks_preferred_over_estimate():
     resp = _chat_response(
         json.dumps(ANSWER),
         usage={"prompt_tokens": 4063, "completion_tokens": 921, "cost_in_usd_ticks": 20060000},
@@ -95,8 +93,7 @@ def test_real_oci_cost_from_ticks_preferred_over_estimate():
         "l",
         base_url=BASE,
         api_key="fake-token",
-        compartment_id="c",
-        model="xai.grok-3-mini",
+        model="deepseekv4-flash",
         post=_capturing_post({}, _Resp(resp)),
     )
     assert usage["cost_usd"] == 20060000 * 1e-11  # ~$0.0002, the real billed amount
@@ -108,7 +105,6 @@ def test_cost_usd_none_when_ticks_absent():
         "l",
         base_url=BASE,
         api_key="fake-token",
-        compartment_id="c",
         model="m",
         post=_capturing_post({}, _Resp(_chat_response(json.dumps(ANSWER), usage={}))),
     )
@@ -123,21 +119,11 @@ def test_parses_json_inside_markdown_fences():
         "lines",
         base_url=BASE,
         api_key="fake-token",
-        compartment_id="c",
-        model="xai.grok-3-mini",
+        model="deepseekv4-flash",
         post=post,
     )
     assert payload["summary"].startswith("Users mostly")
     assert usage["tokens_in"] > 0 and usage["tokens_out"] > 0  # estimated when usage absent
-
-
-def test_omits_compartment_header_when_empty():
-    captured: dict = {}
-    post = _capturing_post(captured, _Resp(_chat_response(json.dumps(ANSWER))))
-    openai_compatible_analyze(
-        "q", "l", base_url=BASE, api_key="fake-token", compartment_id="", model="m", post=post
-    )
-    assert "CompartmentId" not in captured["headers"]
 
 
 def test_http_error_becomes_llmerror_without_leaking_key():
@@ -150,7 +136,6 @@ def test_http_error_becomes_llmerror_without_leaking_key():
             "l",
             base_url=BASE,
             api_key="fake-token-leakcheck",
-            compartment_id="c",
             model="m",
             post=post,
         )
@@ -163,7 +148,7 @@ def test_malformed_choices_raises_llmerror():
 
     with pytest.raises(LLMError):
         openai_compatible_analyze(
-            "q", "l", base_url=BASE, api_key="fake-token", compartment_id="c", model="m", post=post
+            "q", "l", base_url=BASE, api_key="fake-token", model="m", post=post
         )
 
 
@@ -173,7 +158,7 @@ def test_non_json_content_raises_llmerror():
 
     with pytest.raises(LLMError):
         openai_compatible_analyze(
-            "q", "l", base_url=BASE, api_key="fake-token", compartment_id="c", model="m", post=post
+            "q", "l", base_url=BASE, api_key="fake-token", model="m", post=post
         )
 
 
@@ -185,7 +170,6 @@ def test_base_url_trailing_slash_normalized():
         "l",
         base_url=BASE + "/",
         api_key="fake-token",
-        compartment_id="c",
         model="m",
         post=post,
     )
@@ -198,14 +182,10 @@ def test_base_url_trailing_slash_normalized():
 def _settings(**over) -> Settings:
     base = dict(
         database_url="sqlite://",
-        gemini_api_key="",
-        gemini_model="g",
-        llm_provider="",
         llm_base_url="",
         llm_api_key="",
-        llm_compartment_id="",
-        llm_model="xai.grok-3-mini",
-        llm_planner_model="xai.grok-4",
+        llm_model="deepseekv4-flash",
+        llm_planner_model="deepseekv4-flash",
         google_client_id="",
         google_client_secret="",
         google_redirect_uri="",
@@ -225,25 +205,16 @@ def _settings(**over) -> Settings:
     return Settings(**base)
 
 
-def test_provider_resolves_openai_compatible():
-    s = _settings(llm_provider="openai_compatible", llm_api_key="fake-token", llm_base_url=BASE)
+def test_provider_resolves_sarvam_when_key_and_url_set():
+    s = _settings(llm_api_key="fake-token", llm_base_url=BASE)
     assert s.provider() == "openai_compatible"
 
 
-def test_provider_resolves_sarvam_alias():
-    s = _settings(
-        llm_provider="sarvam",
-        llm_api_key="fake-token",
-        llm_base_url="https://api.sarvam.ai/v2",
-    )
-    assert s.provider() == "openai_compatible"
-
-
-def test_provider_falls_back_to_gemini_then_stub():
-    assert _settings(gemini_api_key="g-key").provider() == "gemini"
+def test_provider_falls_back_to_stub():
     assert _settings().provider() == "stub"
-    # openai_compatible declared but key missing -> not selected
-    assert _settings(llm_provider="openai_compatible", llm_base_url=BASE).provider() == "stub"
+    # key missing -> not selected
+    assert _settings(llm_base_url=BASE).provider() == "stub"
+    assert _settings(llm_api_key="fake-token").provider() == "stub"
 
 
 # ---------------------------------------------------------- Sarvam AI tests

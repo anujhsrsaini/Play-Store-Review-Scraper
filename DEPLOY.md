@@ -24,10 +24,8 @@ The stack runs as four containers via Docker Compose: **Caddy** (public HTTPS) �
 Copy `env.example` → `.env` and fill in. Required for prod:
 
 ```
-LLM_PROVIDER=openai_compatible
 LLM_BASE_URL=https://api.sarvam.ai/v2
 LLM_API_KEY=...                  # Sarvam AI API key
-LLM_COMPARTMENT_ID=              # leave empty for Sarvam
 LLM_CHEAP_MODEL=deepseekv4-flash
 LLM_PLANNER_MODEL=deepseekv4-flash
 GOOGLE_CLIENT_ID=...
@@ -51,6 +49,13 @@ docker compose ps                 # health
 
 Caddy obtains the TLS cert automatically on first request to `https://<your-subdomain>`.
 Tables are created on first start (idempotent). Updates: `git pull && docker compose up -d --build`.
+
+## Invite-only beta (Plans 5.4)
+
+For the first launch, keep signups closed: set `SIGNUP_OPEN=0` in `.env`. New Google
+identities then get `403 signup_closed` at the OAuth callback while existing users
+(and anonymous trial, if enabled) keep working. Open up with `SIGNUP_OPEN=1` when
+ready — no rebuild needed, just restart `web`.
 
 ## Co-locating on a box that already runs Caddy (e.g. alongside Metabase)
 
@@ -89,3 +94,9 @@ skip all of this and use the base compose alone (bundled Caddy terminates TLS).
 - **Backups**: `docker compose exec db pg_dump -U $POSTGRES_USER playstore_reviews > backup.sql`.
 - **Local stack test** (no domain/TLS): `docker compose up -d --build db web worker` and hit
   `web` directly, or just use `pmr-serve` against SQLite for everyday local dev.
+- **Image boot proof** (2026-09-25, verified locally): `docker build -t
+  playstore-review-service:local .` then run with stub provider + SQLite; `GET
+  /api/health` → `ok:true`, `GET /privacy` → 200, `POST /api/compare` →
+  `queued` with a job id (proves the Battle Lens tables auto-create on a fresh
+  DB). Full TLS + Postgres proof still needs the Ampere box (no compose plugin
+  or public IP on this machine).

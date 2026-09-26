@@ -190,9 +190,8 @@ def test_worker_falls_back_to_stub_on_llm_error(tmp_path, monkeypatch):
     with build_service(
         tmp_path,
         monkeypatch,
-        LLM_PROVIDER="openai_compatible",
         LLM_API_KEY="fake-token",
-        LLM_BASE_URL="https://oci.example/openai/v1",
+        LLM_BASE_URL="https://api.sarvam.ai/v2",
     ) as (client, sf):
         import playstore_review_service.worker as worker_mod
 

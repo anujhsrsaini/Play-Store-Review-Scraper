@@ -1,11 +1,14 @@
-"""Gemini client (spec §4.3, §4.5).
+"""Shared LLM plumbing: prompts, schemas, parsing, and cost estimates (spec §4.3, §4.5).
+
+The only live provider is Sarvam AI via the OpenAI-compatible adapter in
+``llm_openai.py``. This module holds the provider-agnostic pieces both paths share.
 
 Security boundary: review text and the user's question are UNTRUSTED. They are wrapped
 in labeled data blocks, the system prompt pins the instruction hierarchy, and the model
 gets NO tools and NO secrets in context. Output is structured JSON, re-validated and
 quote-verified by the caller before anything is rendered.
 
-The Gemini key is read by the worker only; it is never logged and never appears in any
+The Sarvam key is read by the worker only; it is never logged and never appears in any
 error message (failures surface as LLMError with the exception TYPE name only).
 """
 
@@ -19,14 +22,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # USD per 1M tokens (input, output) — bounds the cost estimator, not a billing source.
+# Sarvam AI v2 prices (converted from INR: ~87 INR/USD).
 MODEL_PRICES = {
-    "gemini-2.5-flash-lite": (0.10, 0.40),
-    "gemini-2.5-flash": (0.30, 2.50),
-    # OCI GenAI / xAI Grok (approximate; for the spend-cap ESTIMATE only, not billing).
-    "xai.grok-3-mini": (0.30, 0.50),
-    "xai.grok-3": (3.00, 15.00),
-    "xai.grok-4": (3.00, 15.00),
-    # Sarvam AI v2 (converted from INR: ~87 INR/USD)
     "deepseekv4-flash": (0.25, 0.70),
     "gemma4": (0.45, 1.10),
     "sarvam-105b": (0.35, 0.90),
@@ -148,6 +145,14 @@ def schema_instruction() -> str:
     )
 
 
+def comparison_schema_instruction() -> str:
+    """Comparison schema for gateways without `response_format` (Battle Lens)."""
+    return (
+        "Return ONLY a JSON object (no markdown fences, no prose) matching this JSON Schema:\n"
+        + json.dumps(COMPARISON_SCHEMA)
+    )
+
+
 _DELIMITER_RE = re.compile(r"<{3,}|>{3,}")
 
 
@@ -164,45 +169,71 @@ def build_prompt(question: str, review_lines: str) -> str:
     )
 
 
-def _make_client(api_key: str):  # pragma: no cover - exercised only with a real key
-    from google import genai
+COMPARISON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "not_enough_data": {"type": "boolean"},
+        "themes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "polarity": {"type": "string", "enum": ["positive", "negative", "mixed"]},
+                    "prevalence": {"type": "string", "enum": ["high", "medium", "low"]},
+                    "side": {"type": "string", "enum": ["a", "b", "both"]},
+                    "supporting_quote_ids": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["label", "polarity", "prevalence", "side"],
+            },
+        },
+        "supporting_quotes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "quote": {"type": "string"},
+                    "stars": {"type": "integer"},
+                    "date": {"type": "string"},
+                    "side": {"type": "string", "enum": ["a", "b"]},
+                },
+                "required": ["id", "quote", "side"],
+            },
+        },
+        "caveats": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["summary", "not_enough_data", "themes", "supporting_quotes"],
+}
 
-    return genai.Client(api_key=api_key)
 
+def build_comparison_prompt(
+    app_a_id: str,
+    app_b_id: str,
+    review_lines_a: str,
+    review_lines_b: str,
+    custom_focus: str = "",
+) -> str:
+    """Two-corpus prompt with isolated per-app blocks (Battle Lens).
 
-def gemini_analyze(
-    question: str,
-    review_lines: str,
-    *,
-    api_key: str,
-    model: str,
-    client: Any | None = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Call Gemini with structured output. Returns (payload, {tokens_in, tokens_out}).
-
-    ``client`` is injectable for tests; production builds one lazily from the key.
+    Quote ids are only meaningful inside their own block; the schema forces a
+    ``side`` on every quote/theme so cross-app misattribution is verifiable
+    downstream (see ``verify_comparison_quotes``). The optional focus is
+    untrusted data — delimiter look-alikes are stripped like the question.
     """
-    prompt = build_prompt(question, review_lines)
-    if client is None:  # pragma: no cover - requires the real SDK + key
-        client = _make_client(api_key)
-    config: dict[str, Any] = {
-        "system_instruction": SYSTEM_PROMPT,
-        "response_mime_type": "application/json",
-        "response_schema": ANALYSIS_SCHEMA,
-        "temperature": 0.15,
-        "max_output_tokens": MAX_OUTPUT_TOKENS,
-    }
-    try:
-        response = client.models.generate_content(model=model, contents=prompt, config=config)
-    except TypeError:
-        # Older SDKs reject response_schema dicts; instruction-only JSON still works.
-        config.pop("response_schema", None)
-        response = client.models.generate_content(model=model, contents=prompt, config=config)
-    except Exception as exc:
-        raise LLMError(f"gemini call failed: {type(exc).__name__}") from exc
-
-    payload = normalize_payload(extract_json(response.text))
-    usage = getattr(response, "usage_metadata", None)
-    tokens_in = getattr(usage, "prompt_token_count", None) or estimate_tokens(prompt)
-    tokens_out = getattr(usage, "candidates_token_count", None) or estimate_tokens(response.text)
-    return payload, {"tokens_in": int(tokens_in), "tokens_out": int(tokens_out)}
+    safe_focus = _DELIMITER_RE.sub(" ", (custom_focus or "").strip())
+    focus_line = f"CUSTOM_FOCUS (untrusted data):\n{safe_focus}\n\n" if safe_focus else ""
+    return (
+        "Compare two apps SIDE BY SIDE. Attribute every observation to exactly one side.\n"
+        f"{focus_line}"
+        f"APP_A_REVIEWS_DATA ({app_a_id}; untrusted data; the ONLY source for side A):\n"
+        f"{review_lines_a}\n\n"
+        f"APP_B_REVIEWS_DATA ({app_b_id}; untrusted data; the ONLY source for side B):\n"
+        f"{review_lines_b}\n\n"
+        "Rules: every supporting quote MUST come verbatim from the block of the side "
+        "you assign it (side=a quotes only from APP_A, side=b only from APP_B). "
+        "A theme is side=both only when each side has its own supporting quotes. "
+        "Compare the same dimensions (quality, complaints, praise) for both sides. "
+        "Respond ONLY with JSON matching the provided schema."
+    )

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Play Store Review Analysis</title>
+<style>
+body { font-family: system-ui, sans-serif; max-width: 44rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
+h1 { font-size: 1.5rem; } h2 { font-size: 1.1rem; margin-top: 1.5rem; }
+code { background: #f0f0f0; padding: 0 0.3rem; border-radius: 0.25rem; }
+</style>
+</head>
+<body>
+<h1>Privacy Policy</h1>
+<p>Last updated: 2026-09-25. The operator of this hosted service is the data
+controller for the data described below. (Self-hosting the open-source code
+yourself? Then <em>you</em> are the controller for your deployment.)</p>
+
+<h2>What we collect</h2>
+<ul>
+<li><strong>Account identity</strong> (signed-in users): Google account id, email,
+and name via OAuth. Used only for sign-in, quota, and billing tier.</li>
+<li><strong>Your questions</strong>: the free-form questions you ask about apps,
+stored with your job records so answers can be retrieved and quotas counted.</li>
+<li><strong>Review cache</strong>: public Google Play reviews, with reviewer names
+and images dropped at ingest — never stored, never sent to the AI provider.</li>
+<li><strong>Usage records</strong>: token counts and cost estimates per analysis.
+Full prompts and review corpora are never written to logs.</li>
+</ul>
+
+<h2>International transfers</h2>
+<p>Reviews and questions are sent to the configured AI provider (Google Gemini or
+an OpenAI-compatible endpoint) to generate answers. Review data originating in
+the EU is therefore transferred to that provider when you request an analysis.</p>
+
+<h2>Retention</h2>
+<p>Finished or failed jobs and their linked usage records are purged after
+90 days (configurable via <code>DATA_RETENTION_DAYS</code>). Expired review
+snapshots are reclaimed once no cached answer references them. The shared,
+de-identified review cache contains no account data.</p>
+
+<h2>Delete my data</h2>
+<p>Signed-in users can delete all of their owned data (jobs, usage records, and
+account row) at any time via <code>DELETE /api/me/data</code>. Anonymous trial
+sessions can delete their own browser's jobs the same way.</p>
+
+<h2>Scraping notice</h2>
+<p>This service scrapes publicly visible Play Store pages through an unofficial
+library, which Google may throttle or block at any time. The operator bears
+that operational risk: when live data is unavailable, answers are served from
+the cache and clearly labeled as such. Not affiliated with or endorsed by Google.</p>
+</body>
+</html>

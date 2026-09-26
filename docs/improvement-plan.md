@@ -72,7 +72,7 @@ Effort: **S** ≤1 day · **M** a few days · **L** 1–2 weeks+. Impact is user
 | N8 | **Tiny golden-set eval in CI** (10–20 app×question fixtures on frozen snapshots; assert JSON parses, quote-verified ratio ≥ baseline, injection probes don't alter themes, absent-answer → `not_enough_data`) | Stops silent grounding regressions on prompt/model changes — *without* a full LLM-judge rig | High | M | Eval, Skeptic |
 | N9 | **Capture `replyContent` + `repliedAt`** (2 fields + 2 columns) | Unlocks a whole question class (developer responsiveness); the data is being thrown away | Med-High | S | Data Eng |
 | N10 | **Injection-probe + toxicity check** over free-text output and surfaced quotes (public share page shows verbatim, attacker-influenceable text) | The share page renders unverified text/quotes to logged-out viewers | Med-High | M | Eval, Security |
-| N11 | **Operational pre-launch**: verify spend-cap + quota + quote-verify end-to-end on the live OCI Grok path; confirm the datacenter-IP scrape works from the Ampere box (already done); spend alerts 50/80/100% | The #1 real risk is the scraper, not the LLM | High | S | Skeptic, Data Eng |
+| N11 | **Operational pre-launch**: verify spend-cap + quota + quote-verify end-to-end on the live Sarvam path; confirm the datacenter-IP scrape works from the Ampere box (already done); spend alerts 50/80/100% | The #1 real risk is the scraper, not the LLM | High | S | Skeptic, Data Eng |
 
 ### ⏭️ DO NEXT — right after launch, driven by logs
 

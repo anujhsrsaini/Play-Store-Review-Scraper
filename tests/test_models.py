@@ -19,7 +19,7 @@ def test_app_info_preserves_market_research_fields(app_raw):
     assert info.version == "4.3.1"
 
 
-def test_app_info_carries_gemini_context_fields():
+def test_app_info_carries_llm_context_fields():
     raw = {
         "appId": "com.x",
         "icon": "https://example.com/i.png",

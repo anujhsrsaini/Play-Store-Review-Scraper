@@ -1,4 +1,5 @@
-import { LogOut, Mail, ScanSearch, Sparkles } from "lucide-react";
+import { ArrowLeftRight, LogOut, Mail, ScanSearch, Sparkles } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { Me } from "@/lib/api";
 import { CONTACT_MAILTO, CONTACT_TOOLTIP } from "@/lib/site";
 import { Badge } from "./ui";
@@ -15,6 +16,13 @@ export function Header({ me, authEnabled }: { me: Me | null; authEnabled: boolea
         </a>
         <span className="hidden text-sm text-slate-500 sm:inline">· Play Store review analysis</span>
         <div className="ml-auto flex items-center gap-3">
+          <Link
+            to="/compare"
+            className="inline-flex items-center gap-1 text-sm text-slate-400 transition hover:text-white"
+          >
+            <ArrowLeftRight className="h-4 w-4" />
+            <span className="hidden sm:inline">Compare</span>
+          </Link>
           <a
             href={CONTACT_MAILTO}
             title={CONTACT_TOOLTIP}

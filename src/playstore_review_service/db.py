@@ -57,7 +57,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), index=True, default="")
     name: Mapped[str] = mapped_column(String(200), default="")
     tier: Mapped[str] = mapped_column(String(16), default="free")  # free | starter | pro
-    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    dodo_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     subscription_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     paid_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     extra_credits: Mapped[int] = mapped_column(Integer, default=0)
@@ -180,11 +180,76 @@ class UsageLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     job_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    event: Mapped[str] = mapped_column(String(32))  # scrape | gemini_call | cache_hit | stub
+    event: Mapped[str] = mapped_column(String(32))  # scrape | openai_compatible | cache_hit | stub
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class ComparisonJob(Base):
+    __tablename__ = "comparison_jobs"
+    __table_args__ = (
+        Index("idx_cmp_jobs_status_created", "status", "created_at"),
+        Index("idx_cmp_jobs_pair_status", "canonical_pair_hash", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_job_id)
+    user_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    app_a_id: Mapped[str] = mapped_column(String(200), index=True)
+    app_b_id: Mapped[str] = mapped_column(String(200), index=True)
+    canonical_pair_hash: Mapped[str] = mapped_column(String(64), index=True)
+    country: Mapped[str] = mapped_column(String(8), default="us")
+    lang: Mapped[str] = mapped_column(String(8), default="en")
+    lookback_days: Mapped[int] = mapped_column(Integer, default=90)
+    custom_focus: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
+    progress_percent: Mapped[int] = mapped_column(Integer, default=0)
+    progress_stage: Mapped[str] = mapped_column(String(32), default="queued")
+    progress_detail: Mapped[str] = mapped_column(String(200), default="Queued")
+    error: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    snapshot_a_id: Mapped[int | None] = mapped_column(
+        ForeignKey("review_snapshots.id"), nullable=True
+    )
+    snapshot_b_id: Mapped[int | None] = mapped_column(
+        ForeignKey("review_snapshots.id"), nullable=True
+    )
+    comparison_result_id: Mapped[int | None] = mapped_column(
+        ForeignKey("comparison_results.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ComparisonResult(Base):
+    __tablename__ = "comparison_results"
+    __table_args__ = (
+        UniqueConstraint(
+            "canonical_pair_hash",
+            "country",
+            "lang",
+            "lookback_days",
+            "snapshots_hash",
+            "custom_focus_hash",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    share_token: Mapped[str] = mapped_column(String(32), unique=True, index=True, default=new_token)
+    app_a_id: Mapped[str] = mapped_column(String(200), index=True)
+    app_b_id: Mapped[str] = mapped_column(String(200), index=True)
+    canonical_pair_hash: Mapped[str] = mapped_column(String(64), index=True)
+    country: Mapped[str] = mapped_column(String(8), default="us")
+    lang: Mapped[str] = mapped_column(String(8), default="en")
+    lookback_days: Mapped[int] = mapped_column(Integer, default=90)
+    snapshots_hash: Mapped[str] = mapped_column(String(64), index=True)
+    custom_focus_hash: Mapped[str] = mapped_column(String(64), index=True, default="")
+    result: Mapped[dict] = mapped_column(JSON)
+    model: Mapped[str] = mapped_column(String(64), default="stub")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 def make_engine(database_url: str):

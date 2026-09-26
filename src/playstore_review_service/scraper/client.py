@@ -40,6 +40,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TypeVar
 
 from .errors import (
@@ -165,6 +166,21 @@ def with_retries(
     raise classify_exception(last_exc) from last_exc
 
 
+def _is_before_cutoff(created_at: str | None, cutoff_iso: str | None) -> bool:
+    if not created_at or not cutoff_iso:
+        return False
+    try:
+        dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        c_dt = datetime.fromisoformat(cutoff_iso.replace("Z", "+00:00"))
+        if dt.tzinfo is None and c_dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=c_dt.tzinfo)
+        elif dt.tzinfo is not None and c_dt.tzinfo is None:
+            c_dt = c_dt.replace(tzinfo=dt.tzinfo)
+        return dt < c_dt
+    except Exception:
+        return created_at < cutoff_iso
+
+
 def paginate_reviews(
     fetch_page: PageFetcher,
     *,
@@ -173,13 +189,15 @@ def paginate_reviews(
     sleep: Callable[[float], None] = time.sleep,
     delay_seconds: float = DEFAULT_DELAY_SECONDS,
     on_page: Callable[[int], None] | None = None,
+    cutoff_iso: str | None = None,
 ) -> tuple[list[Review], bool]:
-    """Page through reviews until ``max_reviews`` or exhaustion. Pure + deterministic.
+    """Page through reviews until ``max_reviews``, exhaustion, or cutoff. Pure + deterministic.
 
     Termination conditions (all tested):
     - cap reached;
     - empty page;
     - ``next_token`` is None (adapters must normalize the library's token sentinel);
+    - **cutoff reached**: reviews are older than cutoff_iso (early exit for bounded time-windows);
     - **stale page**: a full page that yields zero NEW unique reviews — guards against a
       server repeating the same rows with a live token (would otherwise loop forever);
     - a page fetch failing persistently AFTER some reviews were collected — the partial
@@ -196,6 +214,7 @@ def paginate_reviews(
     token: object | None = None
     first = True
     complete = True
+    hit_cutoff = False
     while len(collected) < max_reviews:
         if not first and delay_seconds > 0:
             sleep(delay_seconds)  # polite delay between pages, not before the first
@@ -217,6 +236,9 @@ def paginate_reviews(
         before = len(collected)
         for raw in rows:
             review = Review.from_raw(raw, anonymize=anonymize)
+            if cutoff_iso and _is_before_cutoff(review.created_at, cutoff_iso):
+                hit_cutoff = True
+                break
             if review.review_id:
                 if review.review_id in seen:
                     continue
@@ -226,6 +248,8 @@ def paginate_reviews(
                 break
         if on_page is not None:
             on_page(len(collected))
+        if hit_cutoff:
+            break
         if len(collected) == before:
             break  # stale page: all duplicates — server is repeating; stop
         if token is None:
@@ -300,6 +324,7 @@ def fetch_reviews(
     anonymize: bool = True,
     delay_seconds: float = DEFAULT_DELAY_SECONDS,
     on_page: Callable[[int], None] | None = None,
+    cutoff_iso: str | None = None,
 ) -> FetchResult:
     """Fetch up to ``max_reviews`` (capped at :data:`HARD_MAX_REVIEWS`) reviews, honestly.
 
@@ -334,6 +359,7 @@ def fetch_reviews(
         anonymize=anonymize,
         delay_seconds=delay_seconds,
         on_page=on_page,
+        cutoff_iso=cutoff_iso,
     )
     return FetchResult(
         app_id=app_id,

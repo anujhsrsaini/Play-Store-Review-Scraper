@@ -77,15 +77,14 @@ Top Praises, Feature Requests, Sentiment Summary, What Changed in Latest Update)
 ### 4.2 Latency / async
 - A scrape + LLM call MUST NOT run in a synchronous HTTP request. Pattern: `POST /analyze`
   → enqueue job → return `job_id` → client polls `GET /jobs/{id}` → result. Scraping and
-  Gemini run in a **separate worker process**, never the web process.
+  the LLM call run in a **separate worker process**, never the web process.
 
 ### 4.3 LLM analysis
-- **Provider is pluggable** (config, not code): `openai_compatible` (Oracle OCI GenAI —
-  default `xai.grok-3-mini`, see `OCI_GENAI_INTEGRATION.md`) → legacy `gemini`
-  (`gemini-2.5-flash-lite`) → `stub` (no-LLM keyword fallback, always works locally).
-  The same grounding prompt, JSON schema, and quote verification apply to every provider.
-  Reasoning models (Grok) need extra output-token headroom (reasoning tokens consume the
-  budget); the OCI adapter sets a larger `max_tokens`. Never default to a heavy/Pro tier.
+- **Provider: Sarvam AI** (OpenAI-compatible, see `SARVAM_INTEGRATION.md`, default
+  `deepseekv4-flash`) → `stub` (no-LLM keyword fallback, always works locally).
+  The same grounding prompt, JSON schema, and quote verification apply to both paths.
+  Reasoning models need extra output-token headroom (reasoning tokens consume the
+  budget); the adapter sets a larger `max_tokens`. Never default to a heavy/Pro tier.
 - **Context = curated sample**, not the full corpus: most-recent N + most-helpful
   (thumbs-up) N + stratified sample across 1–5 stars / recent versions, capped at a fixed
   token budget (~40K). RAG embeddings are the documented scale-up path, not MVP.

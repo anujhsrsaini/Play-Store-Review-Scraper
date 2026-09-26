@@ -111,6 +111,64 @@ export interface SubmitResult {
   result?: AnalysisResult;
 }
 
+export type CompareSide = "a" | "b" | "both";
+
+export interface CompareTheme {
+  label: string;
+  polarity: "positive" | "negative" | "mixed";
+  prevalence: "high" | "medium" | "low";
+  side: CompareSide;
+  supporting_quote_ids?: string[];
+}
+
+export interface CompareQuote {
+  id: string;
+  quote: string;
+  stars?: number | null;
+  date?: string | null;
+  side: "a" | "b";
+}
+
+export interface Comparison {
+  summary: string;
+  not_enough_data: boolean;
+  winner?: "a" | "b" | "tie" | null;
+  themes: CompareTheme[];
+  supporting_quotes: CompareQuote[];
+  caveats: string[];
+}
+
+export interface CompareResult {
+  app_a_id: string;
+  app_b_id: string;
+  country: string;
+  lang: string;
+  lookback_days: number;
+  comparison: Comparison;
+  model: string;
+  snapshots: { a_fetched_at: string | null; b_fetched_at: string | null };
+  share_token?: string; // omitted for anonymous trial results
+}
+
+export type CompareStatus = "queued" | "fetching" | "analyzing" | "done" | "error";
+
+export interface CompareJobState {
+  job_id: string;
+  status: CompareStatus;
+  progress_stage: string;
+  progress_percent: number;
+  progress_detail: string | null;
+  error: string | null;
+  result?: CompareResult;
+}
+
+export interface CompareSubmitResult {
+  job_id: string | null;
+  status: string;
+  cache_hit: boolean;
+  result?: CompareResult;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -155,4 +213,18 @@ export const api = {
     }),
   job: (jobId: string) => req<JobState>(`/api/jobs/${jobId}`),
   analysis: (id: number | string) => req<AnalysisResult>(`/api/analysis/${id}`),
+  compare: (appAId: string, appBId: string, lookbackDays = 90, customFocus = "", country = "in", lang = "en") =>
+    req<CompareSubmitResult>("/api/compare", {
+      method: "POST",
+      body: JSON.stringify({
+        app_a_id: appAId,
+        app_b_id: appBId,
+        country,
+        lang,
+        lookback_days: lookbackDays,
+        custom_focus: customFocus,
+      }),
+    }),
+  compareJob: (jobId: string) => req<CompareJobState>(`/api/compare/${jobId}`),
+  compareResult: (token: string) => req<CompareResult>(`/api/compare/result/${token}`),
 };

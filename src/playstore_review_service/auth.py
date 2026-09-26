@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import Settings
-from .db import Job, User, utcnow
+from .db import ComparisonJob, Job, User, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,15 @@ def upsert_user(session: Session, user_id: str, email: str = "", name: str = "")
         session.add(user)
         session.commit()
     return user
+
+
+def signup_allowed(session: Session, settings: Settings, user_id: str) -> bool:
+    """Invite-only beta gate (Plans 5.4): existing users always get in; unknown
+    identities only when ``SIGNUP_OPEN=1``. The OAuth callback enforces this so a
+    closed launch can't gain new accounts even with the login URL."""
+    if session.get(User, user_id) is not None:
+        return True
+    return bool(settings.signup_open)
 
 
 def resolve_user(request: Request, session_factory: sessionmaker, settings: Settings) -> User:
@@ -147,6 +156,18 @@ def analyses_used_today(session: Session, user_id: str) -> int:
     )
 
 
+def compares_used_today(session: Session, user_id: str) -> int:
+    """Compare jobs a user created today (Battle Lens draws from the same daily quota)."""
+    midnight = datetime.combine(utcnow().date(), dtime.min)
+    return int(
+        session.execute(
+            select(func.count(ComparisonJob.id)).where(
+                ComparisonJob.user_id == user_id, ComparisonJob.created_at >= midnight
+            )
+        ).scalar_one()
+    )
+
+
 def setup_auth_routes(app, oauth, session_factory: sessionmaker, settings: Settings) -> None:
     from fastapi.responses import RedirectResponse
 
@@ -178,6 +199,9 @@ def setup_auth_routes(app, oauth, session_factory: sessionmaker, settings: Setti
         if info.get("email_verified") is False:
             raise HTTPException(400, "email_not_verified")
         with session_factory() as session:
+            if not signup_allowed(session, settings, sub):
+                logger.warning("oauth callback refused: signup closed for new identity")
+                raise HTTPException(403, "signup_closed")
             upsert_user(session, sub, info.get("email", ""), info.get("name", ""))
         request.session.clear()  # fresh session on login (avoid fixation)
         request.session["user_id"] = sub

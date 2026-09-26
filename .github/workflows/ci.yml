@@ -36,3 +36,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t playstore-review-service:ci .
+      # Boot smoke (Plans 5.2): the built image must serve health + privacy and
+      # accept a compare job on a fresh DB (proves migrations-free auto-create).
+      - run: |
+          docker run -d --name pmr-smoke -p 18080:8000 \
+            -e DEV_INPROCESS_WORKER=0 \
+            -e DATABASE_URL=sqlite:////tmp/smoke.db \
+            playstore-review-service:ci
+          sleep 8
+          curl -fsS http://127.0.0.1:18080/api/health
+          curl -fsS -o /dev/null http://127.0.0.1:18080/privacy
+          test "$(curl -fsS -X POST http://127.0.0.1:18080/api/compare \
+            -H 'Content-Type: application/json' \
+            -d '{"app_a_id":"com.a","app_b_id":"com.b"}' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')" = "queued"
+      - run: docker rm -f pmr-smoke
+        if: always()

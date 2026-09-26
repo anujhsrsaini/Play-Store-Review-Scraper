@@ -15,7 +15,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
 # 2. Optional: real LLM analysis (otherwise a no-cost stub analyzer is used)
-cp env.example .env        # then put your key in GEMINI_API_KEY=...
+cp env.example .env        # then put your Sarvam key in LLM_API_KEY=...
 
 # 3. Run (single process: web + in-process dev worker + SQLite)
 pmr-serve                  # → http://localhost:8000
@@ -31,11 +31,11 @@ What to expect locally:
 - **First question on an app**: scrapes up to `MAX_REVIEWS_PER_ANALYSIS` (default 500)
   reviews with a polite 1s delay between pages — takes a minute or two.
 - **Re-asks / repeat questions**: served from the 24h snapshot + answer cache — instant
-  and free (no Gemini call).
-- **No `GEMINI_API_KEY`**: the flow still works end-to-end via a clearly-labeled
-  keyword-frequency stub. With a key: real Gemini (`gemini-2.5-flash-lite` by default),
-  structured output, and quote verification (fabricated quotes are dropped).
-- **Spend guard**: `GLOBAL_DAILY_SPEND_CAP_USD` (default $5) hard-stops Gemini calls
+  and free (no LLM call).
+- **No `LLM_API_KEY`**: the flow still works end-to-end via a clearly-labeled
+  keyword-frequency stub. With a key: real Sarvam analysis (`deepseekv4-flash` by
+  default), structured output, and quote verification (fabricated quotes are dropped).
+- **Spend guard**: `GLOBAL_DAILY_SPEND_CAP_USD` (default $5) hard-stops LLM calls
   for the day when the estimated cost would cross it.
 
 ## Architecture (localhost shape)
@@ -48,26 +48,26 @@ FastAPI (webapp.py) ──► SQLite/Postgres: jobs, review_snapshots(24h TTL),
    │                     cached_reviews (PII-free), analyses (answer cache), usage_log
    ▼
 Worker (worker.py — in-process thread for dev; `pmr-worker` standalone for prod)
-   scrape (cache-first, capped, backoff) → curate sample → Gemini/stub → verify quotes
+   scrape (cache-first, capped, backoff) → curate sample → Sarvam/stub → verify quotes
 ```
 
 - DB: SQLite by default (`local.db`); set `DATABASE_URL` to Postgres for production
   (the job queue then uses `FOR UPDATE SKIP LOCKED`).
 - PII: reviewer names/images are dropped at the scraper boundary AND the DB schema has
   no column for them.
-- Security: the Gemini key never leaves the server; review text and questions are
+- Security: the Sarvam key never leaves the server; review text and questions are
   treated as untrusted data (delimiter stripping, no tools, escaped rendering).
 
 ## Configuration (env vars — see `env.example`)
 
 | Var | Default | Meaning |
 |---|---|---|
-| `GEMINI_API_KEY` | *(empty → stub)* | Owner's Gemini key, server-side only |
-| `GEMINI_DEFAULT_MODEL` | `gemini-2.5-flash-lite` | Analysis model |
+| `LLM_API_KEY` | *(empty → stub)* | Owner's Sarvam key, server-side only |
+| `LLM_CHEAP_MODEL` | `deepseekv4-flash` | Analysis model |
 | `DATABASE_URL` | `sqlite:///./local.db` | SQLAlchemy URL |
 | `MAX_REVIEWS_PER_ANALYSIS` | `500` | Reviews scraped per app snapshot |
 | `SCRAPE_CACHE_TTL_HOURS` | `24` | Snapshot reuse window |
-| `GLOBAL_DAILY_SPEND_CAP_USD` | `5` | Daily Gemini kill-switch |
+| `GLOBAL_DAILY_SPEND_CAP_USD` | `5` | Daily LLM kill-switch |
 | `SCRAPE_DELAY_SECONDS` | `1.0` | Polite inter-page delay |
 | `DEV_INPROCESS_WORKER` | `1` | Run worker inside the web process (dev) |
 
@@ -83,8 +83,11 @@ ruff check . && ruff format --check . && mypy src
 - Not affiliated with or endorsed by Google. Scrapes publicly visible Play Store pages
   via the unofficial `google-play-scraper` library, which can break or be rate-limited
   at any time; data is a point-in-time snapshot, not authoritative.
-- For personal/educational market research. You are responsible for complying with
-  Google Play's Terms of Service and applicable laws when operating this software.
+- **Hosted service**: the operator bears the scraping/ToS/block risk. When live data
+  is unavailable, answers are served from cache and clearly labeled ("live data
+  unavailable" caveat) instead of failing. See `/privacy` and `src/playstore_review_service/static/privacy.html`.
+- **Self-hosting this code**: you become the operator — you are responsible for
+  complying with Google Play's Terms of Service and applicable laws.
 - Scraped reviews contain user-generated content. Reviewer names/images are dropped at
   ingest; do not redistribute scraped datasets without assessing your own data-protection
   obligations.

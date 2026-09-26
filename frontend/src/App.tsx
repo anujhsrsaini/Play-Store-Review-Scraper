@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Header } from "@/components/Header";
+import { Compare } from "@/pages/Compare";
 import { Home } from "@/pages/Home";
 import { Shared } from "@/pages/Shared";
+import { SharedCompare } from "@/pages/SharedCompare";
 import { api, type Health, type Me } from "@/lib/api";
 
 export default function App() {
@@ -33,6 +35,11 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home me={me} authEnabled={authEnabled} onUsed={loadMe} />} />
             <Route path="/a/:id" element={<Shared />} />
+            <Route
+              path="/compare"
+              element={<Compare me={me} authEnabled={authEnabled} onUsed={loadMe} />}
+            />
+            <Route path="/c/:token" element={<SharedCompare />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

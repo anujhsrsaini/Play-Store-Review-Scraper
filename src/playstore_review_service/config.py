@@ -1,7 +1,7 @@
 """Environment-driven settings.
 
 Secrets live in the environment (or a local ``.env`` the user creates from
-``env.example``) — never in code. ``GEMINI_API_KEY`` unset is a supported mode: the
+``env.example``) — never in code. ``LLM_API_KEY`` unset is a supported mode: the
 worker falls back to a no-LLM stub analyzer so the full flow stays testable.
 """
 
@@ -32,14 +32,9 @@ def _load_dotenv(path: Path) -> None:
 @dataclass(frozen=True, slots=True)
 class Settings:
     database_url: str
-    # Legacy Gemini (google-genai SDK) path.
-    gemini_api_key: str
-    gemini_model: str
-    # Provider abstraction (e.g. OCI GenAI via its OpenAI-compatible endpoint).
-    llm_provider: str
+    # Sarvam AI via its OpenAI-compatible endpoint (the only LLM provider).
     llm_base_url: str
     llm_api_key: str
-    llm_compartment_id: str
     llm_model: str  # the model used for analysis (cheap tier)
     llm_planner_model: str  # heavy tier, reserved for future deep-analysis use
     # Auth (Google OAuth). When client id/secret are unset, auth is DISABLED and a single
@@ -60,6 +55,9 @@ class Settings:
     global_daily_spend_cap_usd: float
     scrape_delay_seconds: float
     dev_inprocess_worker: bool
+    # Privacy retention (Plans 3.5): terminal jobs + unreferenced expired snapshots
+    # older than this are purged by the worker's hourly TTL pass.
+    data_retention_days: int = 90
     scraper_proxy_url: str = ""
     dodo_payments_api_key: str = ""
     dodo_payments_webhook_secret: str = ""
@@ -67,10 +65,11 @@ class Settings:
     dodo_product_id_starter: str = ""
     dodo_product_id_pass: str = ""
     dodo_product_id_pro: str = ""
-    stripe_secret_key: str = ""
-    stripe_webhook_secret: str = ""
-    stripe_price_starter: str = ""
-    stripe_price_pass: str = ""
+    # Local-dev/test escape hatch for the mock billing activator. NEVER enable in prod:
+    # /api/billing/mock-activate grants tiers without payment.
+    allow_mock_billing: bool = False
+    # Invite-only beta gate (Plans 5.4): 0 closes new signups (existing users unaffected).
+    signup_open: bool = True
 
     def auth_enabled(self) -> bool:
         return bool(self.google_client_id and self.google_client_secret)
@@ -80,16 +79,10 @@ class Settings:
         return self.auth_enabled() and self.anon_trial_enabled
 
     def provider(self) -> str:
-        """Resolve the active LLM provider. Order: explicit OpenAI-compatible (Sarvam/OCI) →
-        legacy Gemini key → no-LLM stub (always works for local testing)."""
-        if (
-            self.llm_provider in ("openai_compatible", "sarvam")
-            and self.llm_api_key
-            and self.llm_base_url
-        ):
+        """Resolve the active LLM provider: Sarvam (OpenAI-compatible) when its key +
+        base URL are set, else the no-LLM stub (always works for local testing)."""
+        if self.llm_api_key and self.llm_base_url:
             return "openai_compatible"
-        if self.gemini_api_key:
-            return "gemini"
         return "stub"
 
 
@@ -98,12 +91,8 @@ def get_settings() -> Settings:
     _load_dotenv(Path(".env"))
     return Settings(
         database_url=os.environ.get("DATABASE_URL", "sqlite:///./local.db"),
-        gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
-        gemini_model=os.environ.get("GEMINI_DEFAULT_MODEL", "gemini-2.5-flash-lite"),
-        llm_provider=os.environ.get("LLM_PROVIDER", ""),
         llm_base_url=os.environ.get("LLM_BASE_URL", ""),
         llm_api_key=os.environ.get("LLM_API_KEY", ""),
-        llm_compartment_id=os.environ.get("LLM_COMPARTMENT_ID", ""),
         llm_model=os.environ.get(
             "LLM_CHEAP_MODEL",
             os.environ.get("LLM_MODEL", "deepseekv4-flash"),
@@ -123,6 +112,7 @@ def get_settings() -> Settings:
         global_daily_spend_cap_usd=float(os.environ.get("GLOBAL_DAILY_SPEND_CAP_USD", "5")),
         scrape_delay_seconds=float(os.environ.get("SCRAPE_DELAY_SECONDS", "1.0")),
         dev_inprocess_worker=os.environ.get("DEV_INPROCESS_WORKER", "1") == "1",
+        data_retention_days=int(os.environ.get("DATA_RETENTION_DAYS", "90")),
         scraper_proxy_url=os.environ.get("SCRAPER_PROXY_URL", ""),
         dodo_payments_api_key=os.environ.get("DODO_PAYMENTS_API_KEY", ""),
         dodo_payments_webhook_secret=os.environ.get("DODO_PAYMENTS_WEBHOOK_SECRET", ""),
@@ -130,8 +120,6 @@ def get_settings() -> Settings:
         dodo_product_id_starter=os.environ.get("DODO_PRODUCT_ID_STARTER", ""),
         dodo_product_id_pass=os.environ.get("DODO_PRODUCT_ID_PASS", ""),
         dodo_product_id_pro=os.environ.get("DODO_PRODUCT_ID_PRO", ""),
-        stripe_secret_key=os.environ.get("STRIPE_SECRET_KEY", ""),
-        stripe_webhook_secret=os.environ.get("STRIPE_WEBHOOK_SECRET", ""),
-        stripe_price_starter=os.environ.get("STRIPE_PRICE_STARTER", ""),
-        stripe_price_pass=os.environ.get("STRIPE_PRICE_PASS", ""),
+        allow_mock_billing=os.environ.get("ALLOW_MOCK_BILLING", "0") == "1",
+        signup_open=os.environ.get("SIGNUP_OPEN", "1") == "1",
     )
