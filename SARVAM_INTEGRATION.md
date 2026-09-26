@@ -91,7 +91,7 @@ curl -sS -X POST "https://api.sarvam.ai/v2/chat/completions" \
 
 ## Key gotchas
 
-1. **Reasoning-model token budget.** Reasoning models consume completion tokens for hidden thinking before emitting content. If `max_tokens` is set too low (e.g. < 500 for heavy prompts), `message.content` will be empty (`None`) due to token exhaustion. Review Lens configures `DEFAULT_MAX_TOKENS = 6000` to provide plenty of headroom.
+1. **Reasoning-model token budget.** Reasoning models consume completion tokens for hidden thinking before emitting content. If `max_tokens` is set too low, `message.content` will be empty (`None`) due to token exhaustion. Proved live 2026-09-26: full-size compare prompts on messy reviews exhaust 6000 AND 10000 tokens; Review Lens configures `DEFAULT_MAX_TOKENS = 16000` (~10k completion tokens used) with a 240s read timeout.
 2. **Structured / JSON output.** We inject the JSON schema directly into the system prompt ("Respond ONLY with JSON matching the provided schema") and extract the JSON object with `extract_json`, tolerating markdown fences and stripping inline `<think>` tags.
 3. **Usage & billing.** Sarvam returns standard OpenAI usage counts (`prompt_tokens`, `completion_tokens`). Token costs are tracked locally via `MODEL_PRICES` against the daily spend cap.
 

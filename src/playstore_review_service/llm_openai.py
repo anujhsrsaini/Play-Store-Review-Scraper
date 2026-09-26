@@ -32,14 +32,17 @@ from .llm import (
 
 logger = logging.getLogger(__name__)
 
-# (connect, read). Cheap models answer fast; the read budget is generous for a big review
-# batch but well under typical reverse-proxy 504 windows. Reasoning "planner" models would
-# need a much larger read budget (see OCI doc) — not used on this sync analysis path.
-DEFAULT_TIMEOUT: tuple[int, int] = (10, 120)
+# (connect, read). The worker calls the LLM off-request (results are polled), so the
+# read budget covers slow reasoning on big review batches. Verified live 2026-09-26:
+# a full-size compare on messy multilingual reviews needed ~85s and ~10k completion
+# tokens of hidden reasoning before emitting the JSON answer.
+DEFAULT_TIMEOUT: tuple[int, int] = (10, 240)
 TEMPERATURE = 0.15
 # Reasoning models (e.g. deepseekv4-flash, sarvam-105b) spend completion budget
 # on hidden reasoning tokens BEFORE emitting the answer, so the JSON output needs generous headroom.
-DEFAULT_MAX_TOKENS = 6000
+# Verified live 2026-09-26: real-world compare prompts exhaust 6000 AND 10000 tokens
+# (empty content → stub fallback); 16000 succeeds (~10k completion tokens used).
+DEFAULT_MAX_TOKENS = 16000
 USD_PER_TICK = 1e-11  # `cost_in_usd_ticks` → USD (empirically derived; see usage parse)
 
 PostFn = Callable[..., Any]

@@ -11,7 +11,11 @@ import pytest
 
 from playstore_review_service.config import Settings
 from playstore_review_service.llm import LLMError, cost_usd
-from playstore_review_service.llm_openai import openai_compatible_analyze
+from playstore_review_service.llm_openai import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_TIMEOUT,
+    openai_compatible_analyze,
+)
 
 BASE = "https://api.sarvam.ai/v2"
 ANSWER = {
@@ -289,6 +293,14 @@ def test_sarvam_empty_content_triggers_llmerror():
             model="deepseekv4-flash",
             post=post,
         )
+
+
+def test_completion_budget_fits_reasoning_models():
+    # Proved live 2026-09-26: full-size compare prompts on messy multilingual
+    # reviews exhaust 6000 AND 10000 completion tokens (empty content → stub
+    # fallback); 16000 succeeds. Never shrink below the proven floor.
+    assert DEFAULT_MAX_TOKENS >= 16000
+    assert DEFAULT_TIMEOUT[1] >= 240  # slow reasoning took ~85s live
 
 
 def test_sarvam_pricing_registered():

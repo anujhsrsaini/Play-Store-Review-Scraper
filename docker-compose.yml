@@ -35,6 +35,13 @@ services:
         condition: service_healthy
     expose:
       - "8000"
+    networks:
+      default: null
+      edge:
+        aliases:
+          # Stable name the shared (metabase-stack) Caddy reverse-proxies:
+          # reviews.topfolio.in -> reviewlens-web:8000. Keep this alias.
+          - reviewlens-web
 
   worker:
     build: .
@@ -66,3 +73,9 @@ volumes:
   pgdata:
   caddy_data:
   caddy_config:
+
+networks:
+  # Created by the metabase stack; carries the shared Caddy. `docker network
+  # create edge` on a fresh box before first up.
+  edge:
+    external: true
