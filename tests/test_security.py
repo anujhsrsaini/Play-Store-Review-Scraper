@@ -115,6 +115,18 @@ def test_question_delimiters_stripped_from_prompt():
     assert "<<<" not in prompt and ">>>" not in prompt
 
 
+def test_prompts_bound_output_size_for_reasoning_models():
+    # Proved live 2026-09-26: unbounded quote planning burns the whole completion
+    # budget and yields empty content (stub fallback). Both prompts must carry the
+    # compactness bound.
+    from playstore_review_service.llm import OUTPUT_BUDGET_RULE, build_comparison_prompt
+
+    assert "at most 6 themes" in OUTPUT_BUDGET_RULE
+    assert OUTPUT_BUDGET_RULE in build_prompt("q?", "[id=r1] text")
+    compare = build_comparison_prompt("com.a", "com.b", "[id=r1] x", "[id=r9] y")
+    assert OUTPUT_BUDGET_RULE in compare
+
+
 def test_comparison_prompt_isolates_sides_and_strips_focus():
     from playstore_review_service.llm import COMPARISON_SCHEMA, build_comparison_prompt
 
